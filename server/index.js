@@ -11,33 +11,39 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware - CORS Configuration
-app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:8080',
+  'http://localhost:3000',
+  'https://smartmeter-jdw0.onrender.com',
+  'https://smartmeter-coral.vercel.app'
+];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow requests with no origin (curl, mobile apps) and same-origin
     if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      'http://localhost:5173',
-      'http://localhost:8080',
-      'http://localhost:3000',
-      'https://smartmeter-jdw0.onrender.com',
-      'https://smartmeter-coral.vercel.app'
-    ];
-    
-    // Check if origin is in allowed list or matches pattern
-    if (allowedOrigins.indexOf(origin) !== -1 || 
-        origin.endsWith('.vercel.app') || 
-        origin.endsWith('.netlify.app')) {
-      callback(null, true);
-    } else {
-      console.log('Blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
+
+    const isAllowed =
+      allowedOrigins.includes(origin) ||
+      origin.endsWith('.vercel.app') ||
+      origin.endsWith('.netlify.app');
+
+    if (isAllowed) {
+      return callback(null, true);
     }
+    console.log('Blocked origin:', origin);
+    // Return false instead of throwing error to ensure preflight gets CORS headers
+    return callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+};
+
+app.use(cors(corsOptions));
+// Explicitly handle preflight across all routes
+app.options('*', cors(corsOptions));
 app.use(express.json());
 
 // Routes
