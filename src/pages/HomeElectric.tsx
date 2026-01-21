@@ -77,21 +77,21 @@ const HomeElectric = () => {
     {
       id: "dQw4w9WgXcQ",
       title: "How to Use Smart Meter Rwanda Platform",
-      thumbnail: "https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg",
+      thumbnail: "https://picsum.photos/800/450?random=1",
       duration: "3:45",
       views: "12K views"
     },
     {
       id: "jNQXAC9IVRw",
       title: "Understanding Your Electricity Meter",
-      thumbnail: "https://img.youtube.com/vi/jNQXAC9IVRw/maxresdefault.jpg",
+      thumbnail: "https://picsum.photos/800/450?random=2",
       duration: "5:20",
       views: "8.5K views"
     },
     {
       id: "y6120QOlsfU",
       title: "Mobile Money Integration Tutorial",
-      thumbnail: "https://img.youtube.com/vi/y6120QOlsfU/maxresdefault.jpg",
+      thumbnail: "https://picsum.photos/800/450?random=3",
       duration: "4:15",
       views: "15K views"
     }

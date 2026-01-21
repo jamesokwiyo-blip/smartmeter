@@ -40,13 +40,22 @@ cd smartmeter
 npm install
 ```
 
-3. Create a `.env` file in the root directory (use `.env.example` as reference):
+3. Create environment files:
+
+**Backend (.env):**
 ```env
 MONGODB_URI=your_mongodb_connection_string
 JWT_SECRET=your_jwt_secret_key
 PORT=5000
 NODE_ENV=development
 ```
+
+**Frontend (.env.local):** *(optional - for local backend testing)*
+```env
+VITE_API_URL=http://localhost:5000/api
+```
+
+For production, the frontend automatically connects to: `https://smartmeter-jdw0.onrender.com/api`
 
 4. Start the development servers:
 ```bash
