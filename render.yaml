@@ -1,0 +1,27 @@
+services:
+  # Backend API
+  - type: web
+    name: smartmeter-api
+    runtime: node
+    env: node
+    buildCommand: npm install
+    startCommand: npm run dev:server
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+
+  # Frontend
+  - type: web
+    name: smartmeter-frontend
+    runtime: static
+    buildCommand: npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_ENV
+        value: production
