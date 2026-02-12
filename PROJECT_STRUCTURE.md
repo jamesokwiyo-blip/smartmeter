@@ -2,55 +2,45 @@
 
 ## Overview
 
-This project is organized into two main components:
-
-1. **api-server/** - ESP32 firmware and API server for receiving energy meter data
-2. **smartmeter/** - Frontend web application and backend server
+This project is organized with PlatformIO files at the root (for VS Code IDE compatibility) and separate folders for the API server and web application.
 
 ## Directory Structure
 
 ```
-SMART ENERGY METER/
-├── api-server/                    # ESP32 Project + API Server
-│   ├── src/
-│   │   └── main.cpp              # ESP32 firmware code
-│   ├── include/                   # PlatformIO include files
-│   ├── lib/                       # PlatformIO library files
-│   ├── test/                     # PlatformIO test files
-│   ├── platformio.ini            # PlatformIO configuration
-│   ├── server.js                 # Node.js API server (receives ESP32 data)
-│   ├── package.json              # Node.js dependencies for API server
-│   ├── test-api.sh               # API testing script
-│   └── README.md                 # API server documentation
+SMART ENERGY METER/                    # Root - PlatformIO Project
+├── src/
+│   └── main.cpp                      # ESP32 firmware source code
+├── platformio.ini                     # PlatformIO configuration (ROOT - for VS Code IDE)
+├── include/                           # PlatformIO include files
+├── lib/                               # PlatformIO library files
+├── test/                              # PlatformIO test files
 │
-├── smartmeter/                    # Web Application (Frontend + Backend)
-│   ├── src/                       # React/TypeScript frontend source
-│   │   ├── components/           # React components
-│   │   ├── pages/                # Page components
-│   │   ├── lib/                  # Utility libraries
-│   │   └── ...
-│   ├── server/                    # Backend server (MongoDB + Express)
-│   │   ├── index.js              # Main server file
-│   │   ├── database.js           # MongoDB connection
-│   │   ├── models/               # Mongoose models (User, Meter, Purchase)
-│   │   ├── routes/               # API routes (auth, purchases)
-│   │   └── scripts/              # Migration scripts
-│   ├── backend/                  # Alternative backend (duplicate - can be removed)
-│   ├── public/                   # Static assets
-│   ├── package.json              # Frontend + Backend dependencies
-│   └── ...
+├── api-server/                        # Node.js API Server (receives ESP32 data)
+│   ├── server.js                      # API server for receiving energy meter data
+│   ├── package.json                   # Node.js dependencies
+│   ├── test-api.sh                    # API testing script
+│   └── README.md                      # API server documentation
 │
-├── API_DOCUMENTATION.md          # API documentation
-├── TESTING.md                    # Testing guide
-├── SETUP_GUIDE.md                # Setup instructions
-├── Smart_Energy_Meter_API.postman_collection.json  # Postman collection
-└── README.md                     # Main project README
+├── smartmeter/                        # Web Application (Frontend + Backend)
+│   ├── src/                           # React/TypeScript frontend source
+│   ├── server/                        # Backend server (MongoDB + Express)
+│   │   ├── index.js                   # Main server file
+│   │   ├── database.js                # MongoDB connection
+│   │   ├── models/                   # Mongoose models
+│   │   └── routes/                   # API routes
+│   └── package.json                  # Frontend + Backend dependencies
+│
+└── Documentation files
+    ├── API_DOCUMENTATION.md
+    ├── TESTING.md
+    ├── SETUP_GUIDE.md
+    └── ...
 ```
 
 ## Component Details
 
-### api-server/
-**Purpose**: ESP32 firmware and API endpoint for receiving real-time energy meter data
+### Root Directory (PlatformIO Project)
+**Purpose**: ESP32 firmware development - VS Code PlatformIO IDE expects files here
 
 **Contents**:
 - **ESP32 Firmware** (`src/main.cpp`): 
@@ -60,6 +50,17 @@ SMART ENERGY METER/
   - WiFi connectivity
   - Sends data to API server
 
+- **PlatformIO Config** (`platformio.ini`):
+  - Board: ESP32 Dev Module
+  - Framework: Arduino
+  - Libraries: PZEM-004T, Adafruit GFX, Nokia 5110 LCD, etc.
+
+**Why at root?**: VS Code PlatformIO IDE extension automatically detects `platformio.ini` at the workspace root and provides build/upload buttons in the IDE.
+
+### api-server/
+**Purpose**: Node.js API endpoint for receiving real-time energy meter data from ESP32
+
+**Contents**:
 - **API Server** (`server.js`):
   - Receives energy data from ESP32 devices
   - Validates meter numbers (13 digits) and tokens (20 digits)
@@ -104,28 +105,27 @@ SMART ENERGY METER/
 2. **Web Frontend** → User interactions → **smartmeter/server/** (Port 5000)
 3. **smartmeter/server/** → Stores purchases → **MongoDB Atlas**
 
-## Integration Points
-
-### Current State
-- **api-server/server.js**: Standalone API server receiving ESP32 data
-- **smartmeter/server/**: Web application backend with MongoDB
-
-### Future Integration
-The `api-server/server.js` should be integrated with `smartmeter/server/` to:
-- Store energy data in MongoDB instead of JSON files
-- Link energy readings with purchases
-- Provide unified API endpoints
-
 ## Running the Project
 
-### ESP32 Firmware
-```bash
-cd api-server
-pio run -t upload
+### ESP32 Firmware (VS Code PlatformIO IDE)
+1. Open the project root in VS Code
+2. Install PlatformIO IDE extension
+3. Use the PlatformIO toolbar buttons:
+   - Build: `Ctrl+Alt+B` or click ✓
+   - Upload: `Ctrl+Alt+U` or click →→
+   - Monitor: Click Serial Monitor icon
+
+**Or use command line:**
+```powershell
+# From root directory
+$env:PATH += ";$env:USERPROFILE\.platformio\penv\Scripts"
+pio run              # Build
+pio run -t upload    # Upload
+pio device monitor   # Monitor
 ```
 
 ### API Server (ESP32 Data Receiver)
-```bash
+```powershell
 cd api-server
 npm install
 npm start
@@ -133,7 +133,7 @@ npm start
 ```
 
 ### Web Application Backend
-```bash
+```powershell
 cd smartmeter
 npm install
 npm run dev:server
@@ -141,7 +141,7 @@ npm run dev:server
 ```
 
 ### Web Application Frontend
-```bash
+```powershell
 cd smartmeter
 npm install
 npm run dev
@@ -149,14 +149,23 @@ npm run dev
 ```
 
 ### Run Both Frontend + Backend
-```bash
+```powershell
 cd smartmeter
 npm run dev:both
 ```
 
+## VS Code PlatformIO IDE Integration
+
+The PlatformIO files are at the root so VS Code PlatformIO IDE extension can:
+- ✅ Automatically detect the project
+- ✅ Show build/upload buttons in the toolbar
+- ✅ Provide IntelliSense for ESP32 development
+- ✅ Show serial monitor integration
+- ✅ Display project status in the status bar
+
 ## Notes
 
-- The `smartmeter/backend/` folder appears to be a duplicate and can be removed
-- ESP32 firmware sends to `api-server/server.js` on port 3000
-- Web app backend runs on `smartmeter/server/` on port 5000
-- Consider merging `api-server/server.js` into `smartmeter/server/` for unified backend
+- PlatformIO project files (`platformio.ini`, `src/`, `include/`, `lib/`, `test/`) are at root for VS Code IDE compatibility
+- API server (`api-server/`) is separate and can run independently
+- Web app (`smartmeter/`) is a complete full-stack application
+- Consider integrating `api-server/server.js` into `smartmeter/server/` for unified backend
