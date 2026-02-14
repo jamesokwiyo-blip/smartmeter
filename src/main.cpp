@@ -7,16 +7,46 @@
 #include <Wire.h>
 #include <AdvKeyPad.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <NTPClient.h>
 // C library includes for string and math helpers used by strcmp/isnan
 #include <string.h>
 #include <math.h>
 
 // --------------------- WIFI CONFIG ---------------------
-const char* ssid = "YOUR_WIFI_SSID";           // Change this
-const char* password = "YOUR_WIFI_PASSWORD";     // Change this
-const char* apiBaseUrl = "http://your-server.com/api";  // Change this
+// WiFi credentials - can be changed here or via serial input
+const char* ssid = "Airtel_4G_SMARTCONNECT_F812";  // Change this to your WiFi SSID
+const char* password = "9B9F0F52";  // Change this to your WiFi password
+// Smartmeter backend (port 5000). 
+// PC IP: 192.168.1.120 (same network as ESP32)
+const char* apiBaseUrl = "http://192.168.1.120:5000/api";
+
+// --------------------- NTP CONFIG ---------------------
+// NTP servers list
+const char* ntpServers[] = {
+  "pool.ntp.org",
+  "time.nist.gov",
+  "time.google.com",
+  "time.windows.com"
+};
+// Timezone offset (in seconds), e.g., 7200 for GMT+2 (Rwanda)
+const long gmtOffset_sec = 7200;
+// Daylight savings time offset (in seconds), 0 for Rwanda
+const int daylightOffset_sec = 0;
+// NTP update interval (60 seconds)
+const unsigned long ntpUpdateInterval = 60000;
+
+WiFiUDP ntpUDP;
+// Initialize NTPClient with 0 offset - we'll apply timezone manually for accuracy
+// This ensures we have full control over timezone application
+NTPClient timeClient(ntpUDP, ntpServers[0], 0, ntpUpdateInterval);
+bool timeSynchronized = false;
+unsigned long lastNTPAttempt = 0;
+int currentNTPServerIndex = 0;
+int ntpRetries = 10;
+const unsigned long ntpRetryInterval = 1000; // 1 second between retries
 
 // --------------------- METER CONFIG ---------------------
 const char* METER_NUMBER = "0215002079873";  // 13-digit meter number
@@ -77,8 +107,8 @@ const int TOKENS_COUNT = sizeof(tokens) / sizeof(tokens[0]);
 enum State_t { STATE_READY, STATE_ENTERING, STATE_RUNNING, STATE_EXHAUSTED, STATE_BADTOKEN, STATE_WIFI_CONNECTING };
 State_t state = STATE_WIFI_CONNECTING;
 
-// input buffer for 20-digit token (with spaces: 4-4-4-4-4 format)
-char inputBuf[25] = {0};  // 20 digits + 4 spaces + null terminator
+// input buffer for 20-digit token (digits only, spaces added for display)
+char inputBuf[21] = {0};  // 20 digits + null terminator
 uint8_t inputLen = 0;
 
 // running session
@@ -100,6 +130,10 @@ unsigned long lastApiSendMillis = 0;
 const unsigned long API_SEND_INTERVAL_MS = 30000;  // Send data every 30 seconds
 unsigned long sessionStartTime = 0;
 
+// Token polling timing
+unsigned long lastTokenCheckMillis = 0;
+const unsigned long TOKEN_CHECK_INTERVAL_MS = 10000;  // Check for pending tokens every 10 seconds
+
 // WiFi connection status
 bool wifiConnected = false;
 
@@ -113,8 +147,13 @@ void showEnteringScreen();
 void submitToken();
 void connectWiFi();
 void sendEnergyDataToAPI();
-String removeSpaces(String str);
+void sendTestDataToAPI();  // Function to send test data for server testing
 void showWiFiConnectingScreen();
+bool checkForPendingToken();  // Check server for pending token
+bool applyTokenFromServer(String tokenNumber, float kwhAmount, String purchaseId);  // Apply token received from server
+bool validateTokenFromServer(String tokenNumber);  // Validate token with server
+void synchronizeNTPTime();  // Synchronize time with NTP servers
+String getFormattedTimestamp();  // Get formatted timestamp (ISO 8601 format)
 
 void setup() {
   Serial.begin(115200);
@@ -122,7 +161,7 @@ void setup() {
   Serial2.begin(9600, SERIAL_8N1, PZEM_RX_PIN, PZEM_TX_PIN);
 
   display.begin();
-  display.setContrast(55);
+  display.setContrast(75);  // Increased brightness (range: 0-127, higher = brighter)
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(BLACK);
@@ -141,11 +180,19 @@ void setup() {
   digitalWrite(LED_PIN, LOW);
 
   // Connect to WiFi
+  state = STATE_WIFI_CONNECTING;
+  showWiFiConnectingScreen();
   connectWiFi();
   
   if (wifiConnected) {
     showReadyScreen();
     state = STATE_READY;
+    
+    // Start NTP synchronization
+    synchronizeNTPTime();
+    
+    // Uncomment the line below to send test data on startup (for testing)
+    // sendTestDataToAPI();
   } else {
     state = STATE_READY;  // Continue without WiFi
     showReadyScreen();
@@ -157,9 +204,46 @@ void loop() {
   unsigned long now = millis();
 
   // Reconnect WiFi if disconnected
-  if (!wifiConnected && WiFi.status() != WL_CONNECTED) {
+  if (WiFi.status() != WL_CONNECTED) {
+    wifiConnected = false;
     if (now % 10000 < 100) {  // Check every 10 seconds
-      connectWiFi();
+      Serial.println("WiFi disconnected, attempting reconnect...");
+      WiFi.reconnect();
+      delay(1000);
+      if (WiFi.status() == WL_CONNECTED) {
+        wifiConnected = true;
+        Serial.println("WiFi reconnected!");
+        // Reinitialize NTP after reconnection
+        if (!timeSynchronized) {
+          timeClient.begin();
+          synchronizeNTPTime();
+        }
+      } else {
+        // If reconnect fails, use WiFiManager
+        connectWiFi();
+      }
+    }
+  } else if (!wifiConnected) {
+    wifiConnected = true;
+    Serial.println("WiFi reconnected!");
+    // Reinitialize NTP after reconnection
+    if (!timeSynchronized) {
+      timeClient.begin();
+      synchronizeNTPTime();
+    }
+  }
+  
+  // Synchronize NTP time if WiFi is connected
+  if (wifiConnected && WiFi.status() == WL_CONNECTED && !timeSynchronized) {
+    synchronizeNTPTime();
+  }
+
+  // Check for pending tokens from server (when ready or running, and WiFi connected)
+  // This allows new tokens to be applied even while a token is currently running
+  if ((state == STATE_READY || state == STATE_RUNNING) && wifiConnected && WiFi.status() == WL_CONNECTED) {
+    if (now - lastTokenCheckMillis >= TOKEN_CHECK_INTERVAL_MS) {
+      lastTokenCheckMillis = now;
+      checkForPendingToken();
     }
   }
 
@@ -266,6 +350,15 @@ void connectWiFi() {
     Serial.println("WiFi connected!");
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
+    Serial.print("MAC address: ");
+    Serial.println(WiFi.macAddress());
+    
+    // Initialize NTP client after WiFi connection
+    timeClient.begin();
+    timeSynchronized = false;
+    lastNTPAttempt = 0;
+    currentNTPServerIndex = 0;
+    ntpRetries = 10;
   } else {
     wifiConnected = false;
     Serial.println("");
@@ -273,17 +366,113 @@ void connectWiFi() {
   }
 }
 
-void sendEnergyDataToAPI() {
+/**
+ * Synchronize time with NTP servers
+ */
+void synchronizeNTPTime() {
+  if (timeSynchronized) return; // No need to synchronize if time is already synchronized
+  
   if (!wifiConnected || WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi not connected, skipping API call");
-    return;
+    return; // Can't sync without WiFi
   }
+
+  unsigned long currentMillis = millis();
+  
+  // Check if it's time to retry the NTP request
+  if (currentMillis - lastNTPAttempt >= ntpRetryInterval) {
+    lastNTPAttempt = currentMillis;
+
+    if (ntpRetries > 0) {
+      Serial.print("Trying NTP server: ");
+      Serial.println(ntpServers[currentNTPServerIndex]);
+
+      timeClient.setPoolServerName(ntpServers[currentNTPServerIndex]);
+      timeClient.begin();
+
+      if (timeClient.update()) {
+        Serial.println("Time synchronized successfully!");
+        
+        // Get UTC epoch time from NTP (NTPClient initialized with 0 offset)
+        unsigned long utcEpoch = timeClient.getEpochTime();
+        
+        // Manually add timezone offset for Rwanda (GMT+2 = 7200 seconds)
+        unsigned long localEpoch = utcEpoch + gmtOffset_sec + daylightOffset_sec;
+        
+        // Convert to time components
+        time_t rawTime = (time_t)localEpoch;
+        struct tm *timeInfo = gmtime(&rawTime);
+        
+        char formattedTime[25];
+        snprintf(formattedTime, sizeof(formattedTime), "%04d-%02d-%02dT%02d:%02d:%02d",
+                 timeInfo->tm_year + 1900, timeInfo->tm_mon + 1, timeInfo->tm_mday,
+                 timeInfo->tm_hour, timeInfo->tm_min, timeInfo->tm_sec);
+        
+        Serial.print("NTP UTC Time: ");
+        Serial.println(utcEpoch);
+        Serial.print("Local Time (GMT+2): ");
+        Serial.println(formattedTime);
+        timeSynchronized = true;
+      } else {
+        Serial.println("Failed to get time from this server, retrying...");
+        ntpRetries--;
+        currentNTPServerIndex = (currentNTPServerIndex + 1) % (sizeof(ntpServers) / sizeof(ntpServers[0]));
+        timeClient.end(); // End previous client session
+      }
+    } else {
+      Serial.println("Unable to synchronize time from all NTP servers.");
+      timeSynchronized = true; // Stop retrying
+    }
+  }
+}
+
+/**
+ * Get formatted timestamp in ISO 8601 format (YYYY-MM-DDTHH:MM:SS)
+ */
+String getFormattedTimestamp() {
+  if (timeSynchronized && timeClient.isTimeSet()) {
+    // Get UTC epoch time from NTP (NTPClient initialized with 0 offset)
+    unsigned long utcEpoch = timeClient.getEpochTime();
+    
+    // Manually add timezone offset for Rwanda (GMT+2 = 7200 seconds)
+    unsigned long localEpoch = utcEpoch + gmtOffset_sec + daylightOffset_sec;
+    
+    // Convert to time components
+    time_t rawTime = (time_t)localEpoch;
+    struct tm *timeInfo = gmtime(&rawTime);
+    
+    char formattedTime[25];
+    snprintf(formattedTime, sizeof(formattedTime), "%04d-%02d-%02dT%02d:%02d:%02d",
+             timeInfo->tm_year + 1900, timeInfo->tm_mon + 1, timeInfo->tm_mday,
+             timeInfo->tm_hour, timeInfo->tm_min, timeInfo->tm_sec);
+    
+    return String(formattedTime);
+  } else {
+    // Fallback: return placeholder if NTP not synchronized
+    Serial.println("WARNING: NTP not synchronized, using fallback timestamp");
+    return "1970-01-01T00:00:00";
+  }
+}
+
+void sendEnergyDataToAPI() {
+  // Check WiFi connection before each request
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi disconnected, attempting reconnect...");
+    wifiConnected = false;
+    connectWiFi();
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("WiFi not connected, skipping API call");
+      return;
+    }
+  }
+  wifiConnected = true;
 
   HTTPClient http;
   String url = String(apiBaseUrl) + "/energy-data";
   
   http.begin(url);
+  http.setTimeout(10000);  // 10 second timeout
   http.addHeader("Content-Type", "application/json");
+  http.addHeader("Connection", "close");  // Ensure clean connection
 
   // Get current PZEM readings
   float voltage = pzem.voltage();
@@ -313,7 +502,18 @@ void sendEnergyDataToAPI() {
   if (!isnan(frequency)) doc["frequency"] = frequency;
   if (!isnan(pf)) doc["powerFactor"] = pf;
   
-  doc["timestamp"] = millis();  // Unix timestamp in milliseconds
+  // Add Unix timestamp in milliseconds (NTP synchronized)
+  // Database expects Number, not String
+  if (timeSynchronized && timeClient.isTimeSet()) {
+    unsigned long utcEpoch = timeClient.getEpochTime();
+    unsigned long localEpoch = utcEpoch + gmtOffset_sec + daylightOffset_sec;
+    doc["timestamp"] = (unsigned long long)localEpoch * 1000;  // Convert to milliseconds
+  } else {
+    doc["timestamp"] = millis();  // Fallback to millis if NTP not synced
+  }
+  
+  // Also include formatted timestamp as a separate field for readability
+  doc["timestampFormatted"] = getFormattedTimestamp();
 
   String jsonPayload;
   serializeJson(doc, jsonPayload);
@@ -321,7 +521,33 @@ void sendEnergyDataToAPI() {
   Serial.println("Sending data to API:");
   Serial.println(jsonPayload);
 
-  int httpResponseCode = http.POST(jsonPayload);
+  // Retry logic for failed requests
+  int httpResponseCode = -1;
+  int retries = 0;
+  const int maxRetries = 2;
+  
+  while (httpResponseCode <= 0 && retries < maxRetries) {
+    if (retries > 0) {
+      Serial.print("Retry attempt ");
+      Serial.print(retries);
+      Serial.println("...");
+      delay(1000);  // Wait before retry
+      
+      // Recheck WiFi
+      if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("WiFi lost during retry, reconnecting...");
+        connectWiFi();
+        if (WiFi.status() != WL_CONNECTED) {
+          Serial.println("WiFi reconnection failed");
+          http.end();
+          return;
+        }
+      }
+    }
+    
+    httpResponseCode = http.POST(jsonPayload);
+    retries++;
+  }
 
   if (httpResponseCode > 0) {
     Serial.print("HTTP Response code: ");
@@ -331,9 +557,239 @@ void sendEnergyDataToAPI() {
   } else {
     Serial.print("Error code: ");
     Serial.println(httpResponseCode);
+    Serial.println("Failed after retries. WiFi status: " + String(WiFi.status()));
   }
 
   http.end();
+}
+
+/**
+ * sendTestDataToAPI()
+ * Sends test/simulated energy meter data to the API server for testing purposes
+ * This function can be called manually or triggered for testing the server
+ */
+void sendTestDataToAPI() {
+  if (!wifiConnected || WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected, skipping test API call");
+    return;
+  }
+
+  HTTPClient http;
+  String url = String(apiBaseUrl) + "/energy-data";
+  
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+
+  // Create test JSON payload with simulated data
+  DynamicJsonDocument doc(1024);
+  doc["meterNumber"] = METER_NUMBER;
+  doc["token"] = "18886583547834136861";  // Test token
+  doc["clientName"] = CLIENT_NAME;
+  if (strlen(CLIENT_TIN) > 0) {
+    doc["clientTIN"] = CLIENT_TIN;
+  }
+  doc["clientPhone"] = CLIENT_PHONE;
+  doc["remainingKwh"] = 4.523;  // Test remaining energy
+  doc["sessionDuration"] = 120;  // Test session duration in seconds
+  
+  // Add simulated PZEM readings
+  doc["voltage"] = 230.5;      // Test voltage
+  doc["current"] = 5.2;        // Test current
+  doc["power"] = 1200.0;       // Test power
+  doc["totalEnergy"] = 150.5;  // Test total energy
+  doc["frequency"] = 50.0;     // Test frequency
+  doc["powerFactor"] = 0.95;   // Test power factor
+  
+  doc["timestamp"] = getFormattedTimestamp();  // ISO 8601 formatted timestamp
+
+  String jsonPayload;
+  serializeJson(doc, jsonPayload);
+
+  Serial.println("========================================");
+  Serial.println("Sending TEST data to API:");
+  Serial.println(jsonPayload);
+  Serial.println("========================================");
+
+  int httpResponseCode = http.POST(jsonPayload);
+
+  if (httpResponseCode > 0) {
+    Serial.print("✅ TEST - HTTP Response code: ");
+    Serial.println(httpResponseCode);
+    String response = http.getString();
+    Serial.println("Response: " + response);
+  } else {
+    Serial.print("❌ TEST - Error code: ");
+    Serial.println(httpResponseCode);
+    Serial.println("Check server URL and connectivity");
+  }
+
+  http.end();
+}
+
+/**
+ * checkForPendingToken()
+ * Checks the server for pending tokens for this meter
+ * Returns true if a token was found and applied, false otherwise
+ */
+bool checkForPendingToken() {
+  // Check WiFi connection
+  if (WiFi.status() != WL_CONNECTED) {
+    wifiConnected = false;
+    return false;
+  }
+  wifiConnected = true;
+
+  HTTPClient http;
+  String url = String(apiBaseUrl) + "/purchases/pending-token/" + String(METER_NUMBER);
+  
+  http.begin(url);
+  http.setTimeout(8000);  // 8 second timeout
+  http.addHeader("Connection", "close");
+
+  int httpResponseCode = http.GET();
+
+  if (httpResponseCode == 200) {
+    String response = http.getString();
+    DynamicJsonDocument doc(512);
+    deserializeJson(doc, response);
+
+    if (doc["success"].as<bool>() && doc["hasToken"].as<bool>()) {
+      String tokenNumber = doc["token"]["tokenNumber"].as<String>();
+      float kwhAmount = doc["token"]["kwhAmount"].as<float>();
+      String purchaseId = doc["token"]["purchaseId"].as<String>();
+
+      Serial.println("Found pending token: " + tokenNumber);
+      Serial.print("kWh: "); Serial.println(kwhAmount);
+
+      // Apply the token
+      if (applyTokenFromServer(tokenNumber, kwhAmount, purchaseId)) {
+        http.end();
+        return true;
+      }
+    }
+    // No pending token found - silently continue (don't log every check)
+    // Device will maintain current state and remaining energy
+  } else {
+    // Only log actual errors, not "no token" responses
+    Serial.print("Error checking pending token: ");
+    Serial.println(httpResponseCode);
+  }
+
+  http.end();
+  return false;
+}
+
+/**
+ * applyTokenFromServer()
+ * Applies a token received from the server
+ * Returns true if successful, false otherwise
+ */
+bool applyTokenFromServer(String tokenNumber, float kwhAmount, String purchaseId) {
+  // Apply the token (add to existing remaining energy if already running)
+  if (state == STATE_RUNNING && remaining_kwh > 0) {
+    // If already running, add new token energy to existing balance
+    remaining_kwh += kwhAmount;
+    Serial.print("Added new token energy. Total remaining: ");
+    Serial.println(remaining_kwh);
+  } else {
+    // Starting fresh or exhausted, set new energy
+    remaining_kwh = kwhAmount;
+  }
+  currentToken = tokenNumber;
+  state = STATE_RUNNING;
+  lastMillis = millis();
+  sessionStartTime = millis();
+  lastDisplayMillis = 0;
+  lastApiSendMillis = 0;
+  digitalWrite(LED_PIN, HIGH);
+  
+  Serial.print("Token applied from server, kWh: "); Serial.println(kwhAmount);
+  Serial.print("Token: "); Serial.println(currentToken);
+
+  // Show notification on display
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.println("Token Applied!");
+  display.println("From Server");
+  if (state == STATE_RUNNING && remaining_kwh > kwhAmount) {
+    // Show that energy was added to existing
+    display.print("Added: ");
+    display.print(kwhAmount, 2);
+    display.println(" kWh");
+    display.print("Total: ");
+    display.print(remaining_kwh, 2);
+    display.println(" kWh");
+  } else {
+    // New token starting
+    display.print("kWh: ");
+    display.println(kwhAmount, 2);
+  }
+  display.display();
+  delay(2000);
+  showRunningScreen();
+
+  // Confirm token was applied to server
+  HTTPClient http;
+  String url = String(apiBaseUrl) + "/purchases/confirm-token/" + purchaseId;
+  
+  http.begin(url);
+  http.setTimeout(5000);
+  int httpResponseCode = http.POST("{}");
+
+  if (httpResponseCode > 0) {
+    Serial.println("Token confirmed on server");
+  } else {
+    Serial.print("Failed to confirm token: ");
+    Serial.println(httpResponseCode);
+  }
+  http.end();
+
+  // Send initial data to API
+  if (wifiConnected) {
+    sendEnergyDataToAPI();
+  }
+
+  return true;
+}
+
+/**
+ * validateTokenFromServer()
+ * Validates a token with the server
+ * Returns true if token is valid, false otherwise
+ */
+bool validateTokenFromServer(String tokenNumber) {
+  if (!wifiConnected || WiFi.status() != WL_CONNECTED) {
+    return false;
+  }
+
+  // Check if this token is pending for this meter
+  HTTPClient http;
+  String url = String(apiBaseUrl) + "/purchases/pending-token/" + String(METER_NUMBER);
+  
+  http.begin(url);
+  http.setTimeout(5000);
+
+  int httpResponseCode = http.GET();
+
+  if (httpResponseCode == 200) {
+    String response = http.getString();
+    DynamicJsonDocument doc(512);
+    deserializeJson(doc, response);
+
+    if (doc["success"].as<bool>() && doc["hasToken"].as<bool>()) {
+      String pendingToken = doc["token"]["tokenNumber"].as<String>();
+      if (pendingToken == tokenNumber) {
+        // Token matches pending token, apply it
+        float kwhAmount = doc["token"]["kwhAmount"].as<float>();
+        String purchaseId = doc["token"]["purchaseId"].as<String>();
+        http.end();
+        return applyTokenFromServer(tokenNumber, kwhAmount, purchaseId);
+      }
+    }
+  }
+
+  http.end();
+  return false;
 }
 
 void handleKeypad() {
@@ -347,8 +803,45 @@ void handleKeypad() {
     char k = keys[keyIndex / COLS][keyIndex % COLS];
     Serial.print("Key: "); Serial.println(k);
 
-    // Ignore B and C
-    if (k == 'B' || k == 'C') return;
+    // Key B: Send test data to API (for testing server)
+    if (k == 'B') {
+      if (wifiConnected) {
+        Serial.println("Key B pressed - Sending test data to API");
+        sendTestDataToAPI();
+        display.clearDisplay();
+        display.setCursor(0,0);
+        display.println("Energy Meter");
+        display.println("----------------");
+        display.println("Test data sent!");
+        display.println("Check Serial");
+        display.display();
+        delay(2000);
+        if (state == STATE_READY) {
+          showReadyScreen();
+        } else {
+          showEnteringScreen();
+        }
+      } else {
+        Serial.println("WiFi not connected - Cannot send test data");
+        display.clearDisplay();
+        display.setCursor(0,0);
+        display.println("Energy Meter");
+        display.println("----------------");
+        display.println("WiFi not connected");
+        display.println("Cannot test API");
+        display.display();
+        delay(2000);
+        if (state == STATE_READY) {
+          showReadyScreen();
+        } else {
+          showEnteringScreen();
+        }
+      }
+      return;
+    }
+    
+    // Ignore C
+    if (k == 'C') return;
 
     if (k >= '0' && k <= '9') {
       if (state == STATE_READY) {
@@ -357,18 +850,14 @@ void handleKeypad() {
         inputBuf[0] = '\0';
       }
       if (state == STATE_ENTERING) {
-        // 20 digits total, with spaces at positions 4, 9, 14, 19
-        // Format: XXXX XXXX XXXX XXXX XXXX
-        if (inputLen < 24) {  // 20 digits + 4 spaces
-          // Add space after every 4 digits (positions 4, 9, 14, 19)
-          if (inputLen > 0 && (inputLen % 5 == 4)) {
-            inputBuf[inputLen++] = ' ';
-          }
+        // 20 digits total - store only digits in buffer (spaces added only for display)
+        // Format: XXXX XXXX XXXX XXXX XXXX (display format)
+        if (inputLen < 20) {  // Allow up to 20 digits
           inputBuf[inputLen++] = k;
           inputBuf[inputLen] = '\0';
           showEnteringScreen();
-          // Auto-submit when 20 digits entered (24 chars with spaces)
-          if (inputLen == 24) {
+          // Auto-submit when 20 digits entered
+          if (inputLen == 20) {
             submitToken();
           }
         }
@@ -399,10 +888,10 @@ void handleKeypad() {
 }
 
 void submitToken() {
-  // Remove spaces from input for comparison
-  String tokenWithoutSpaces = removeSpaces(String(inputBuf));
+  // Input buffer already contains only digits (no spaces)
+  String tokenString = String(inputBuf);
   
-  if (tokenWithoutSpaces.length() != 20) {
+  if (tokenString.length() != 20) {
     state = STATE_BADTOKEN;
     display.clearDisplay();
     display.setCursor(0,0);
@@ -423,7 +912,7 @@ void submitToken() {
   const char* clientPhone = CLIENT_PHONE;
   
   for (int i = 0; i < TOKENS_COUNT; ++i) {
-    if (tokenWithoutSpaces.equals(tokens[i].code)) {
+    if (tokenString.equals(tokens[i].code)) {
       found = true;
       kwh = tokens[i].kwh;
       clientName = tokens[i].clientName;
@@ -433,22 +922,51 @@ void submitToken() {
     }
   }
 
-  if (!found) {
+  // If not found locally, check server if WiFi is available
+  if (!found && wifiConnected) {
+    Serial.println("Token not found locally, checking server...");
+    display.clearDisplay();
+    display.setCursor(0,0);
+    display.println("Checking server...");
+    display.display();
+    
+    if (validateTokenFromServer(tokenString)) {
+      // Token validated and applied by server, return early
+      inputLen = 0;
+      inputBuf[0] = '\0';
+      return;
+    } else {
+      state = STATE_BADTOKEN;
+      display.clearDisplay();
+      display.setCursor(0,0);
+      display.println("BAD TOKEN!");
+      display.println("Not found");
+      display.println("Returning...");
+      display.display();
+      Serial.println("BAD TOKEN - Not found on server either");
+      inputLen = 0;
+      inputBuf[0] = '\0';
+      return;
+    }
+  } else if (!found) {
+    // No WiFi, can't check server
     state = STATE_BADTOKEN;
     display.clearDisplay();
     display.setCursor(0,0);
     display.println("BAD TOKEN!");
     display.println("Not found");
+    display.println("No network");
     display.println("Returning...");
     display.display();
-    Serial.println("BAD TOKEN - Not found in database");
+    Serial.println("BAD TOKEN - Not found locally and no WiFi");
     inputLen = 0;
     inputBuf[0] = '\0';
     return;
   }
 
+  // Apply token from local database
   remaining_kwh = kwh;
-  currentToken = tokenWithoutSpaces;
+  currentToken = tokenString;
   state = STATE_RUNNING;
   lastMillis = millis();
   sessionStartTime = millis();
@@ -466,16 +984,6 @@ void submitToken() {
 
   inputLen = 0;
   inputBuf[0] = '\0';
-}
-
-String removeSpaces(String str) {
-  String result = "";
-  for (unsigned int i = 0; i < str.length(); i++) {
-    if (str[i] != ' ') {
-      result += str[i];
-    }
-  }
-  return result;
 }
 
 // Display functions
@@ -499,25 +1007,23 @@ void showEnteringScreen() {
   display.println("----------------");
   display.print("Token: ");
   
-  // Display token with formatting
-  int digitCount = 0;
+  // Display token with formatting (add spaces every 4 digits)
   for (uint8_t i = 0; i < inputLen; ++i) {
-    if (inputBuf[i] != ' ') {
-      display.print(inputBuf[i]);
-      digitCount++;
-      if (digitCount % 4 == 0 && digitCount < 20) {
-        display.print(' ');
-      }
-    } else {
+    display.print(inputBuf[i]);
+    // Add space after every 4 digits (after positions 3, 7, 11, 15)
+    if ((i + 1) % 4 == 0 && i < 19) {
       display.print(' ');
     }
   }
   
-  // Show remaining placeholders
-  int remainingDigits = 20 - digitCount;
+  // Show remaining placeholders with spaces
+  int remainingDigits = 20 - inputLen;
   for (int i = 0; i < remainingDigits; ++i) {
-    if (i > 0 && i % 4 == 0) display.print(' ');
     display.print('_');
+    // Add space after every 4 digits
+    if ((inputLen + i + 1) % 4 == 0 && (inputLen + i) < 19) {
+      display.print(' ');
+    }
   }
   
   display.println("");

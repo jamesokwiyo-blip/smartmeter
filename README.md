@@ -81,7 +81,40 @@ SMART ENERGY METER/
 
 The API server will run on `http://localhost:3000`
 
-### 3. Testing
+### 3. Smartmeter Web App Backend (Dashboard)
+
+The web dashboard uses a separate Node server (port 5000) in the `smartmeter` folder.
+
+**Start the server:**
+```powershell
+cd smartmeter
+node server/index.js
+```
+
+**Restart the server** (e.g. after code changes):
+
+1. Stop the current server in its terminal: **Ctrl+C**
+
+2. Start it again:
+   ```powershell
+   cd "c:\Users\ASCOS CO.LTD\Documents\PlatformIO\Projects\SMART ENERGY METER\smartmeter"
+   node server/index.js
+   ```
+
+3. If you get *"address already in use"* because the old process is still running, free port 5000 then start:
+   ```powershell
+   # Stop whatever is on port 5000 (PowerShell)
+   $p = Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -First 1
+   if ($p) { Stop-Process -Id $p -Force }
+
+   # Then start the server
+   cd "c:\Users\ASCOS CO.LTD\Documents\PlatformIO\Projects\SMART ENERGY METER\smartmeter"
+   node server/index.js
+   ```
+
+The server runs at `http://localhost:5000`. Set `apiBaseUrl` in `src/main.cpp` to `http://YOUR_PC_IP:5000/api` so the ESP32 sends data to this backend and it appears on the dashboard.
+
+### 4. Testing
 
 #### Using Postman
 1. Import `Smart_Energy_Meter_API.postman_collection.json` into Postman
