@@ -38,6 +38,14 @@ const purchaseSchema = new mongoose.Schema({
     type: String,
     default: 'COMPLETED'
   },
+  tokenApplied: {
+    type: Boolean,
+    default: false
+  },
+  tokenAppliedAt: {
+    type: Date,
+    default: null
+  },
   date: {
     type: String,
     required: true

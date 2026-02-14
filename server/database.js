@@ -2,6 +2,9 @@ import mongoose from 'mongoose';
 import User from './models/User.js';
 import Meter from './models/Meter.js';
 import Purchase from './models/Purchase.js';
+import EnergyData from './models/EnergyData.js';
+
+const { ObjectId } = mongoose.Types;
 
 // MongoDB connection
 export async function initializeDatabase() {
@@ -49,6 +52,31 @@ const db = {
     }
   },
 
+  async saveResetToken(userId, resetToken) {
+    try {
+      const expiry = new Date();
+      expiry.setHours(expiry.getHours() + 1); // Token valid for 1 hour
+      await User.findByIdAndUpdate(userId, {
+        resetToken,
+        resetTokenExpiry: expiry
+      });
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  async updatePassword(userId, passwordHash) {
+    try {
+      await User.findByIdAndUpdate(userId, {
+        passwordHash,
+        resetToken: null,
+        resetTokenExpiry: null
+      });
+    } catch (error) {
+      throw error;
+    }
+  },
+
   // Meters
   async createMeter(userId, meterNumber) {
     try {
@@ -67,8 +95,11 @@ const db = {
 
   async getMetersByUserId(userId) {
     try {
-      return await Meter.find({ userId }).sort({ createdAt: -1 });
+      // Ensure userId is a valid ObjectId
+      const userIdObj = typeof userId === 'string' ? new ObjectId(userId) : userId;
+      return await Meter.find({ userId: userIdObj }).sort({ createdAt: -1 });
     } catch (error) {
+      console.error('Error in getMetersByUserId:', error);
       throw error;
     }
   },
@@ -96,8 +127,11 @@ const db = {
 
   async getPurchasesByUserId(userId) {
     try {
-      return await Purchase.find({ userId }).sort({ createdAt: -1 });
+      // Ensure userId is a valid ObjectId
+      const userIdObj = typeof userId === 'string' ? new ObjectId(userId) : userId;
+      return await Purchase.find({ userId: userIdObj }).sort({ createdAt: -1 });
     } catch (error) {
+      console.error('Error in getPurchasesByUserId:', error);
       throw error;
     }
   },
@@ -105,6 +139,91 @@ const db = {
   async getPurchasesByMeterNumber(meterNumber) {
     try {
       return await Purchase.find({ meterNumber }).sort({ createdAt: -1 });
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  async getPendingTokenForMeter(meterNumber) {
+    try {
+      // Get the most recent purchase for this meter that hasn't been applied yet
+      return await Purchase.findOne({ 
+        meterNumber,
+        tokenApplied: false 
+      }).sort({ createdAt: -1 });
+    } catch (error) {
+      console.error('Error in getPendingTokenForMeter:', error);
+      throw error;
+    }
+  },
+
+  async confirmTokenApplied(purchaseId) {
+    try {
+      const purchaseIdObj = typeof purchaseId === 'string' ? new ObjectId(purchaseId) : purchaseId;
+      return await Purchase.findByIdAndUpdate(
+        purchaseIdObj,
+        { 
+          tokenApplied: true,
+          tokenAppliedAt: new Date()
+        },
+        { new: true }
+      );
+    } catch (error) {
+      console.error('Error in confirmTokenApplied:', error);
+      throw error;
+    }
+  },
+
+  // Energy data (from ESP32)
+  async createEnergyData(data) {
+    try {
+      const doc = await EnergyData.create(data);
+      return doc;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  async getEnergyDataList({ meterNumber, token, limit = 10, offset = 0 }) {
+    try {
+      const filter = {};
+      if (meterNumber) filter.meterNumber = meterNumber;
+      if (token) filter.token = token;
+      const total = await EnergyData.countDocuments(filter);
+      const data = await EnergyData.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(parseInt(offset, 10))
+        .limit(parseInt(limit, 10))
+        .lean();
+      return { data, total };
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  async getLatestEnergyDataByMeter(meterNumber) {
+    try {
+      return await EnergyData.findOne({ meterNumber })
+        .sort({ createdAt: -1 })
+        .lean();
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  async getEnergyDataListForMeters(meterNumbers, limit = 10, offset = 0) {
+    try {
+      if (!meterNumbers || meterNumbers.length === 0) {
+        return { data: [], total: 0 };
+      }
+      const filter = { meterNumber: { $in: meterNumbers } };
+      const total = await EnergyData.countDocuments(filter);
+      const data = await EnergyData.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(parseInt(offset, 10))
+        .limit(parseInt(limit, 10))
+        .lean();
+      return { data, total };
     } catch (error) {
       throw error;
     }

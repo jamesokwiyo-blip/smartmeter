@@ -5,13 +5,16 @@ import crypto from 'crypto';
 
 const router = express.Router();
 
-// Generate unique token and recharge code
+// Generate 20-digit numeric token only (matches ESP32 format, e.g. 18886583547834136861)
 function generateTokenAndCode() {
-  // Generate 20-digit token number
-  const tokenNumber = Array.from({ length: 20 }, () => Math.floor(Math.random() * 10)).join('');
-  
+  const digits = '0123456789';
+  let token20 = '';
+  const bytes = crypto.randomBytes(20);
+  for (let i = 0; i < 20; i++) {
+    token20 += digits[bytes[i] % 10];
+  }
   return {
-    tokenNumber,
+    tokenNumber: token20,
     rechargeCode: `${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
   };
 }
@@ -26,19 +29,25 @@ router.post('/buy', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    // Meter number must be 13 digits (matches ESP32 METER_NUMBER format)
+    const meterStr = String(meterNumber).replace(/\s+/g, '').replace(/[^\d]/g, '');
+    if (!/^\d{13}$/.test(meterStr)) {
+      return res.status(400).json({ error: 'Meter number must be exactly 13 digits' });
+    }
+
     // Calculate kWh (1 kWh = 125 RWF)
     const kwhAmount = parseFloat((amountRWF / 125).toFixed(2));
 
     // Generate token and code
     const { tokenNumber, rechargeCode } = generateTokenAndCode();
 
-    // Create meter if needed
-    await db.createMeter(userId, meterNumber);
+    // Create meter if needed (use normalized 13-digit string)
+    await db.createMeter(userId, meterStr);
 
     // Create purchase
     const purchase = await db.createPurchase(
       userId,
-      meterNumber,
+      meterStr,
       amountRWF,
       kwhAmount,
       paymentMethod,
@@ -71,7 +80,14 @@ router.post('/buy', verifyToken, async (req, res) => {
 router.get('/history', verifyToken, async (req, res) => {
   try {
     const userId = req.userId;
+    console.log('Getting purchase history for userId:', userId);
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'User ID not found in token' });
+    }
+
     const purchases = await db.getPurchasesByUserId(userId);
+    console.log(`Found ${purchases.length} purchases for user ${userId}`);
 
     res.json({
       success: true,
@@ -79,8 +95,8 @@ router.get('/history', verifyToken, async (req, res) => {
         id: p._id,
         date: new Date(p.date).toLocaleDateString(),
         meterNumber: p.meterNumber,
-        amount: p.amountRWF,
-        kwh: p.kwhAmount,
+        amount: Number(p.amountRWF) || 0,  // Ensure numeric value
+        kwh: Number(p.kwhAmount) || 0,      // Ensure numeric value
         paymentMethod: p.paymentMethod,
         tokenNumber: p.tokenNumber,
         rechargeCode: p.rechargeCode,
@@ -89,7 +105,11 @@ router.get('/history', verifyToken, async (req, res) => {
     });
   } catch (error) {
     console.error('History error:', error);
-    res.status(500).json({ error: 'Failed to get history' });
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to get history',
+      details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
   }
 });
 
@@ -127,7 +147,14 @@ router.get('/profile', verifyToken, async (req, res) => {
 router.get('/meters', verifyToken, async (req, res) => {
   try {
     const userId = req.userId;
+    console.log('Getting meters for userId:', userId);
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'User ID not found in token' });
+    }
+
     const meters = await db.getMetersByUserId(userId);
+    console.log(`Found ${meters.length} meters for user ${userId}`);
 
     res.json({
       success: true,
@@ -139,7 +166,93 @@ router.get('/meters', verifyToken, async (req, res) => {
     });
   } catch (error) {
     console.error('Meters error:', error);
-    res.status(500).json({ error: 'Failed to get meters' });
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to get meters',
+      details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
+  }
+});
+
+// Get pending token for a meter (ESP32 endpoint - no auth required)
+router.get('/pending-token/:meterNumber', async (req, res) => {
+  try {
+    const { meterNumber } = req.params;
+    
+    // Validate meter number format (13 digits)
+    const meterStr = String(meterNumber).replace(/\s+/g, '').replace(/[^\d]/g, '');
+    if (!/^\d{13}$/.test(meterStr)) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Invalid meter number format. Must be 13 digits' 
+      });
+    }
+
+    // Find the most recent unprocessed purchase for this meter
+    // A purchase is "unprocessed" if it hasn't been confirmed by the meter yet
+    const purchase = await db.getPendingTokenForMeter(meterStr);
+    
+    if (!purchase) {
+      return res.json({
+        success: true,
+        hasToken: false,
+        message: 'No pending token for this meter'
+      });
+    }
+
+    res.json({
+      success: true,
+      hasToken: true,
+      token: {
+        tokenNumber: purchase.tokenNumber,
+        kwhAmount: purchase.kwhAmount,
+        amountRWF: purchase.amountRWF,
+        purchaseId: purchase._id.toString(),
+        createdAt: purchase.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Pending token error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to get pending token',
+      details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
+  }
+});
+
+// Confirm token was applied (ESP32 endpoint - no auth required)
+router.post('/confirm-token/:purchaseId', async (req, res) => {
+  try {
+    const { purchaseId } = req.params;
+    
+    // Mark purchase as confirmed/processed
+    const purchase = await db.confirmTokenApplied(purchaseId);
+    
+    if (!purchase) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Purchase not found' 
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Token confirmed as applied',
+      purchase: {
+        id: purchase._id,
+        meterNumber: purchase.meterNumber,
+        tokenNumber: purchase.tokenNumber,
+        status: purchase.status
+      }
+    });
+  } catch (error) {
+    console.error('Confirm token error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to confirm token',
+      details: process.env.NODE_ENV !== 'production' ? error.message : undefined
+    });
   }
 });
 
