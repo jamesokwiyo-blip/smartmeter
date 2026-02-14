@@ -1,4 +1,14 @@
 #include <Arduino.h>
+#include "config.h"
+
+// Serial logging: when SERIAL_LOGGING_ENABLED is 0 (production), no output
+#if SERIAL_LOGGING_ENABLED
+#  define SERIAL_PRINT(...)   Serial.print(__VA_ARGS__)
+#  define SERIAL_PRINTLN(...) Serial.println(__VA_ARGS__)
+#else
+#  define SERIAL_PRINT(...)   ((void)0)
+#  define SERIAL_PRINTLN(...) ((void)0)
+#endif
 
 // Combined sketch: PZEM + Nokia 5110 + PCF8574T Keypad + token logic + WiFi + API
 #include <PZEM004Tv30.h>
@@ -11,17 +21,15 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <NTPClient.h>
+#include <EEPROM.h>
 // C library includes for string and math helpers used by strcmp/isnan
 #include <string.h>
 #include <math.h>
 
-// --------------------- WIFI CONFIG ---------------------
-// WiFi credentials - can be changed here or via serial input
-const char* ssid = "Airtel_4G_SMARTCONNECT_F812";  // Change this to your WiFi SSID
-const char* password = "9B9F0F52";  // Change this to your WiFi password
-// Smartmeter backend - Production server
-// Production API: https://smartmeter-jdw0.onrender.com/api
-const char* apiBaseUrl = "https://smartmeter-jdw0.onrender.com/api";
+// --------------------- WIFI & API (from config.h) -------
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
+const char* apiBaseUrl = API_BASE_URL;
 
 // --------------------- NTP CONFIG ---------------------
 // NTP servers list
@@ -48,13 +56,7 @@ int currentNTPServerIndex = 0;
 int ntpRetries = 10;
 const unsigned long ntpRetryInterval = 1000; // 1 second between retries
 
-// --------------------- METER CONFIG ---------------------
-const char* METER_NUMBER = "0215002079873";  // 13-digit meter number
-
-// --------------------- CLIENT CONFIG ---------------------
-const char* CLIENT_NAME = "YUMVUHORE";
-const char* CLIENT_TIN = "";  // Optional, leave empty if not available
-const char* CLIENT_PHONE = "0782946444";
+// Meter and client details are in config.h (METER_NUMBER, CLIENT_NAME, CLIENT_TIN, CLIENT_PHONE)
 
 // --------------------- PZEM CONFIG ---------------------
 #define PZEM_RX_PIN 17
@@ -83,8 +85,12 @@ char keys[ROWS][COLS] = {
 };
 AdvKeyPad keypad(KBD_ADDR);
 
-// --------------------- LED -------------------------------
-#define LED_PIN 2
+// --------------------- RELAY (power control) --------------
+// Relay ON = power to load, Relay OFF = cutoff when energy exhausted
+#define RELAY_PIN 2
+#define EEPROM_SIZE 64
+#define EEPROM_ADDR_REMAINING_KWH  0   // float (4 bytes)
+#define EEPROM_ADDR_SESSION_PURCHASED 4 // float (4 bytes)
 
 // --------------------- TOKENS ----------------------------
 // Token format: 20 digits with spaces (e.g., "1888 6583 5478 3413 6861")
@@ -97,15 +103,18 @@ struct Token {
   const char *clientPhone;
 };
 Token tokens[] = {
-  {"18886583547834136861", 5.0, "YUMVUHORE", "", "0782946444"},
-  {"12345678901234567890", 10.0, "YUMVUHORE", "", "0782946444"},
-  {"98765432109876543210", 25.0, "YUMVUHORE", "", "0782946444"}
+  {"18886583547834136861", 5.0, CLIENT_NAME, CLIENT_TIN, CLIENT_PHONE},
+  {"12345678901234567890", 10.0, CLIENT_NAME, CLIENT_TIN, CLIENT_PHONE},
+  {"98765432109876543210", 25.0, CLIENT_NAME, CLIENT_TIN, CLIENT_PHONE}
 };
 const int TOKENS_COUNT = sizeof(tokens) / sizeof(tokens[0]);
 
 // --------------------- STATE -----------------------------
-enum State_t { STATE_READY, STATE_ENTERING, STATE_RUNNING, STATE_EXHAUSTED, STATE_BADTOKEN, STATE_WIFI_CONNECTING };
+enum State_t { STATE_READY, STATE_ENTERING, STATE_RUNNING, STATE_EXHAUSTED, STATE_BADTOKEN, STATE_WIFI_CONNECTING, STATE_INFO_SCREEN };
 State_t state = STATE_WIFI_CONNECTING;
+unsigned long infoScreenStart = 0;  // For C/B/# info screens (auto-return after 5s)
+int infoScreenType = 0;             // 0=meter, 1=energy, 2=previous token
+String lastTokenEntered = "";       // Last token applied (for B = check previous token)
 
 // input buffer for 20-digit token (digits only, spaces added for display)
 char inputBuf[21] = {0};  // 20 digits + null terminator
@@ -113,6 +122,7 @@ uint8_t inputLen = 0;
 
 // running session
 float remaining_kwh = 0.0;
+float session_purchased_kwh = 0.0;  // Total kWh at session start (for consumed = session_purchased_kwh - remaining_kwh)
 unsigned long lastMillis = 0;
 String currentToken = "";  // Store current token for API calls
 
@@ -120,6 +130,10 @@ String currentToken = "";  // Store current token for API calls
 uint8_t lastKeyIndex = 255;
 unsigned long lastKeyMillis = 0;
 const unsigned long KEY_DEBOUNCE_MS = 80;
+
+// keypad high priority: for 30s after any key press, skip blocking network calls so keypad stays responsive
+unsigned long lastKeypadActivityMillis = 0;
+const unsigned long KEYPAD_PRIORITY_MS = 30000;
 
 // display timing
 unsigned long lastDisplayMillis = 0;
@@ -137,18 +151,25 @@ const unsigned long TOKEN_CHECK_INTERVAL_MS = 10000;  // Check for pending token
 // WiFi connection status
 bool wifiConnected = false;
 
+// EEPROM helpers: persist purchased/remaining energy across power loss
+void loadEnergyFromEEPROM();
+void saveRemainingToEEPROM();
+void saveSessionPurchasedToEEPROM();
+
 // Forward declarations
 void showReadyScreen();
 void handleKeypad();
 void showRunningScreen();
 void showExhaustedScreen();
-void blinkLED();
 void showEnteringScreen();
 void submitToken();
 void connectWiFi();
 void sendEnergyDataToAPI();
 void sendTestDataToAPI();  // Function to send test data for server testing
 void showWiFiConnectingScreen();
+void showMeterNumberScreen();
+void showCheckEnergyScreen();
+void showPreviousTokenScreen();
 bool checkForPendingToken();  // Check server for pending token
 bool applyTokenFromServer(String tokenNumber, float kwhAmount, String purchaseId);  // Apply token received from server
 bool validateTokenFromServer(String tokenNumber);  // Validate token with server
@@ -168,7 +189,7 @@ void setup() {
 
   Wire.begin(SDA_PIN, SCL_PIN);
   if (!keypad.begin()) {
-    Serial.println("Error: Couldn't find PCF8574T I2C expander");
+    SERIAL_PRINTLN("Error: Couldn't find PCF8574T I2C expander");
     display.clearDisplay();
     display.setCursor(0,0);
     display.println("Keypad Err");
@@ -176,8 +197,20 @@ void setup() {
     while (1);
   }
 
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, LOW);  // Relay OFF (no power to load) until we have energy
+
+  EEPROM.begin(EEPROM_SIZE);
+  loadEnergyFromEEPROM();
+
+  // Relay from restored energy: ON if we have remaining, OFF otherwise
+  if (remaining_kwh > 0.00001f) {
+    digitalWrite(RELAY_PIN, HIGH);  // Relay ON (power to load)
+  } else {
+    remaining_kwh = 0.0f;
+    session_purchased_kwh = 0.0f;
+    digitalWrite(RELAY_PIN, LOW);   // Relay OFF (cutoff)
+  }
 
   // Connect to WiFi
   state = STATE_WIFI_CONNECTING;
@@ -185,47 +218,70 @@ void setup() {
   connectWiFi();
   
   if (wifiConnected) {
-    showReadyScreen();
-    state = STATE_READY;
-    
+    if (remaining_kwh > 0.00001f) {
+      state = STATE_RUNNING;
+      digitalWrite(RELAY_PIN, HIGH);
+      showRunningScreen();
+    } else {
+      showReadyScreen();
+      state = STATE_READY;
+    }
     // Start NTP synchronization
     synchronizeNTPTime();
     
     // Uncomment the line below to send test data on startup (for testing)
     // sendTestDataToAPI();
   } else {
-    state = STATE_READY;  // Continue without WiFi
-    showReadyScreen();
+    state = (remaining_kwh > 0.00001f) ? STATE_RUNNING : STATE_READY;
+    if (state == STATE_RUNNING) {
+      digitalWrite(RELAY_PIN, HIGH);
+      showRunningScreen();
+    } else {
+      showReadyScreen();
+    }
   }
 }
 
+/**
+ * loop() execution order and blocking:
+ * 1. handleKeypad() - ONLY keypad poll; if we block below, no keys are seen until we return.
+ * 2. WiFi reconnect - can block (delay + connectWiFi up to ~10s).
+ * 3. NTP sync - timeClient.update() can block several seconds.
+ * 4. checkForPendingToken() every 10s - http.GET() blocks up to timeout (2s).
+ * 5. STATE_RUNNING: sendEnergyDataToAPI() every 30s - http.POST() + retry delay block.
+ * 6. submitToken() -> validateTokenFromServer() / applyTokenFromServer() - HTTP + delay(2s) block.
+ * So: long delays and HTTP calls prevent handleKeypad() from running; keypad is polled only once per loop. Fix: poll keypad during every long delay and again at end of loop.
+ */
 void loop() {
   handleKeypad();
   unsigned long now = millis();
 
-  // Reconnect WiFi if disconnected
+  // Reconnect WiFi if disconnected - skip during keypad priority (first 30s after any key)
   if (WiFi.status() != WL_CONNECTED) {
     wifiConnected = false;
-    if (now % 10000 < 100) {  // Check every 10 seconds
-      Serial.println("WiFi disconnected, attempting reconnect...");
+    bool doReconnect = (now % 10000 < 100);  // every 10s
+    if (doReconnect) {
+      bool skipForKeypad = (now - lastKeypadActivityMillis < KEYPAD_PRIORITY_MS);
+      if (!skipForKeypad) {
+      SERIAL_PRINTLN("WiFi disconnected, attempting reconnect...");
       WiFi.reconnect();
-      delay(1000);
+      for (int i = 0; i < 20; i++) { handleKeypad(); delay(50); }  // ~1s, keypad stays responsive
       if (WiFi.status() == WL_CONNECTED) {
         wifiConnected = true;
-        Serial.println("WiFi reconnected!");
+        SERIAL_PRINTLN("WiFi reconnected!");
         // Reinitialize NTP after reconnection
         if (!timeSynchronized) {
           timeClient.begin();
           synchronizeNTPTime();
         }
       } else {
-        // If reconnect fails, use WiFiManager
         connectWiFi();
+      }
       }
     }
   } else if (!wifiConnected) {
     wifiConnected = true;
-    Serial.println("WiFi reconnected!");
+    SERIAL_PRINTLN("WiFi reconnected!");
     // Reinitialize NTP after reconnection
     if (!timeSynchronized) {
       timeClient.begin();
@@ -233,14 +289,24 @@ void loop() {
     }
   }
   
-  // Synchronize NTP time if WiFi is connected
+  // Keypad priority: for 30s after any key we skip blocking work; then resume normal loop
+  bool keypadPriorityActive = (now - lastKeypadActivityMillis < KEYPAD_PRIORITY_MS);
+  static bool wasKeypadPriority = false;
+  if (!keypadPriorityActive && wasKeypadPriority) {
+    Serial.println("[KEYPAD] 30s idle - normal loop resumed");
+    wasKeypadPriority = false;
+  }
+  if (keypadPriorityActive) wasKeypadPriority = true;
+
+  // Synchronize NTP time at WiFi connect (skip during keypad priority so loop stays fast)
   if (wifiConnected && WiFi.status() == WL_CONNECTED && !timeSynchronized) {
-    synchronizeNTPTime();
+    if (!keypadPriorityActive)
+      synchronizeNTPTime();
   }
 
-  // Check for pending tokens from server (when ready or running, and WiFi connected)
-  // This allows new tokens to be applied even while a token is currently running
-  if ((state == STATE_READY || state == STATE_RUNNING) && wifiConnected && WiFi.status() == WL_CONNECTED) {
+  // Check for pending tokens from server - SKIP during keypad priority (first 30s after any key)
+  if (!keypadPriorityActive &&
+      (state == STATE_READY || state == STATE_RUNNING) && wifiConnected && WiFi.status() == WL_CONNECTED) {
     if (now - lastTokenCheckMillis >= TOKEN_CHECK_INTERVAL_MS) {
       lastTokenCheckMillis = now;
       checkForPendingToken();
@@ -270,38 +336,51 @@ void loop() {
       lastDisplayMillis = now;
     }
 
-    // Output AC parameters on Serial monitor
+    // Output AC parameters and energy on Serial monitor (same as sent to API/dashboard)
     float voltage = pzem.voltage();
     float current = pzem.current();
+    float powerW = pzem.power();
+    float energyKwh = pzem.energy();
     float frequency = pzem.frequency();
     float pf = pzem.pf();
-    if (!isnan(voltage) && !isnan(current) && !isnan(frequency) && !isnan(pf)) {
-      Serial.print("V:"); Serial.print(voltage); Serial.print("V ");
-      Serial.print("I:"); Serial.print(current); Serial.print("A ");
-      Serial.print("F:"); Serial.print(frequency); Serial.print("Hz ");
-      Serial.print("PF:"); Serial.println(pf);
+    if (!isnan(voltage) && !isnan(current)) {
+      SERIAL_PRINT("V:"); SERIAL_PRINT(voltage); SERIAL_PRINT("V ");
+      SERIAL_PRINT("I:"); SERIAL_PRINT(current); SERIAL_PRINT("A ");
+      if (!isnan(powerW)) { SERIAL_PRINT("P:"); SERIAL_PRINT(powerW); SERIAL_PRINT("W "); }
+      if (!isnan(energyKwh)) { SERIAL_PRINT("E:"); SERIAL_PRINT(energyKwh, 3); SERIAL_PRINT("kWh "); }
+      if (!isnan(frequency)) { SERIAL_PRINT("F:"); SERIAL_PRINT(frequency); SERIAL_PRINT("Hz "); }
+      if (!isnan(pf)) { SERIAL_PRINT("PF:"); SERIAL_PRINTLN(pf); } else { SERIAL_PRINTLN(""); }
     }
 
-    // Send data to API periodically
-    if (wifiConnected && (now - lastApiSendMillis >= API_SEND_INTERVAL_MS)) {
+    // Send data to API periodically - SKIP during keypad priority so keypad stays responsive
+    if (!keypadPriorityActive &&
+        wifiConnected && (now - lastApiSendMillis >= API_SEND_INTERVAL_MS)) {
       sendEnergyDataToAPI();
       lastApiSendMillis = now;
     }
 
-    // Check energy exhausted
+    // Check energy exhausted -> cutoff power (relay OFF)
     if (remaining_kwh <= 0.00001) {
-      // Send final data before exhausting
+      // Send final data before exhausting (always send)
       if (wifiConnected) {
         sendEnergyDataToAPI();
       }
+      digitalWrite(RELAY_PIN, LOW);  // Cutoff power
+      saveRemainingToEEPROM();
       state = STATE_EXHAUSTED;
       lastMillis = 0;
       showExhaustedScreen();
+    } else {
+      // Periodically save remaining to EEPROM so it survives power loss
+      static unsigned long lastEepromSave = 0;
+      if (now - lastEepromSave >= 5000) {
+        lastEepromSave = now;
+        saveRemainingToEEPROM();
+      }
     }
   }
 
   if (state == STATE_EXHAUSTED) {
-    blinkLED();
     if (millis() - lastDisplayMillis >= 1000) {
       showExhaustedScreen();
       lastDisplayMillis = millis();
@@ -327,31 +406,38 @@ void loop() {
     }
   }
 
+  // Info screens (C=Energy, B=Prev token, #/*/0=Meter): auto-return to READY after 5s
+  if (state == STATE_INFO_SCREEN && (now - infoScreenStart >= 5000)) {
+    state = STATE_READY;
+    showReadyScreen();
+  }
+
+  handleKeypad();  // Poll again so keys are not missed after long stretches
   delay(5);
 }
 
 void connectWiFi() {
-  Serial.print("Connecting to WiFi: ");
-  Serial.println(ssid);
+  SERIAL_PRINT("Connecting to WiFi: ");
+  SERIAL_PRINTLN(ssid);
   
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-    delay(500);
-    Serial.print(".");
+    for (int i = 0; i < 10; i++) { handleKeypad(); delay(50); }  // ~500ms, keypad stays responsive
+    SERIAL_PRINT(".");
     attempts++;
   }
   
   if (WiFi.status() == WL_CONNECTED) {
     wifiConnected = true;
-    Serial.println("");
-    Serial.println("WiFi connected!");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
-    Serial.print("MAC address: ");
-    Serial.println(WiFi.macAddress());
+    SERIAL_PRINTLN("");
+    SERIAL_PRINTLN("WiFi connected!");
+    SERIAL_PRINT("IP address: ");
+    SERIAL_PRINTLN(WiFi.localIP());
+    SERIAL_PRINT("MAC address: ");
+    SERIAL_PRINTLN(WiFi.macAddress());
     
     // Initialize NTP client after WiFi connection
     timeClient.begin();
@@ -361,8 +447,8 @@ void connectWiFi() {
     ntpRetries = 10;
   } else {
     wifiConnected = false;
-    Serial.println("");
-    Serial.println("WiFi connection failed!");
+    SERIAL_PRINTLN("");
+    SERIAL_PRINTLN("WiFi connection failed!");
   }
 }
 
@@ -383,14 +469,14 @@ void synchronizeNTPTime() {
     lastNTPAttempt = currentMillis;
 
     if (ntpRetries > 0) {
-      Serial.print("Trying NTP server: ");
-      Serial.println(ntpServers[currentNTPServerIndex]);
+      SERIAL_PRINT("Trying NTP server: ");
+      SERIAL_PRINTLN(ntpServers[currentNTPServerIndex]);
 
       timeClient.setPoolServerName(ntpServers[currentNTPServerIndex]);
       timeClient.begin();
 
       if (timeClient.update()) {
-        Serial.println("Time synchronized successfully!");
+        SERIAL_PRINTLN("Time synchronized successfully!");
         
         // Get UTC epoch time from NTP (NTPClient initialized with 0 offset)
         unsigned long utcEpoch = timeClient.getEpochTime();
@@ -407,19 +493,19 @@ void synchronizeNTPTime() {
                  timeInfo->tm_year + 1900, timeInfo->tm_mon + 1, timeInfo->tm_mday,
                  timeInfo->tm_hour, timeInfo->tm_min, timeInfo->tm_sec);
         
-        Serial.print("NTP UTC Time: ");
-        Serial.println(utcEpoch);
-        Serial.print("Local Time (GMT+2): ");
-        Serial.println(formattedTime);
+        SERIAL_PRINT("NTP UTC Time: ");
+        SERIAL_PRINTLN(utcEpoch);
+        SERIAL_PRINT("Local Time (GMT+2): ");
+        SERIAL_PRINTLN(formattedTime);
         timeSynchronized = true;
       } else {
-        Serial.println("Failed to get time from this server, retrying...");
+        SERIAL_PRINTLN("Failed to get time from this server, retrying...");
         ntpRetries--;
         currentNTPServerIndex = (currentNTPServerIndex + 1) % (sizeof(ntpServers) / sizeof(ntpServers[0]));
         timeClient.end(); // End previous client session
       }
     } else {
-      Serial.println("Unable to synchronize time from all NTP servers.");
+      SERIAL_PRINTLN("Unable to synchronize time from all NTP servers.");
       timeSynchronized = true; // Stop retrying
     }
   }
@@ -448,7 +534,7 @@ String getFormattedTimestamp() {
     return String(formattedTime);
   } else {
     // Fallback: return placeholder if NTP not synchronized
-    Serial.println("WARNING: NTP not synchronized, using fallback timestamp");
+    SERIAL_PRINTLN("WARNING: NTP not synchronized, using fallback timestamp");
     return "1970-01-01T00:00:00";
   }
 }
@@ -456,11 +542,11 @@ String getFormattedTimestamp() {
 void sendEnergyDataToAPI() {
   // Check WiFi connection before each request
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi disconnected, attempting reconnect...");
+    SERIAL_PRINTLN("WiFi disconnected, attempting reconnect...");
     wifiConnected = false;
     connectWiFi();
     if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("WiFi not connected, skipping API call");
+      SERIAL_PRINTLN("WiFi not connected, skipping API call");
       return;
     }
   }
@@ -470,7 +556,7 @@ void sendEnergyDataToAPI() {
   String url = String(apiBaseUrl) + "/energy-data";
   
   http.begin(url);
-  http.setTimeout(10000);  // 10 second timeout
+  http.setTimeout(3000);   // 3s - keep short so keypad stays responsive on failure
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Connection", "close");  // Ensure clean connection
 
@@ -492,9 +578,12 @@ void sendEnergyDataToAPI() {
   }
   doc["clientPhone"] = CLIENT_PHONE;
   doc["remainingKwh"] = remaining_kwh;
+  float consumed_kwh = session_purchased_kwh - remaining_kwh;
+  if (consumed_kwh < 0.0f) consumed_kwh = 0.0f;
+  doc["consumedKwh"] = consumed_kwh;
   doc["sessionDuration"] = (millis() - sessionStartTime) / 1000;  // seconds
   
-  // Add PZEM readings if valid
+  // Add PZEM readings if valid (V, I, P, total energy, F, PF - for dashboard diagnostics)
   if (!isnan(voltage)) doc["voltage"] = voltage;
   if (!isnan(current)) doc["current"] = current;
   if (!isnan(power)) doc["power"] = power;
@@ -518,8 +607,8 @@ void sendEnergyDataToAPI() {
   String jsonPayload;
   serializeJson(doc, jsonPayload);
 
-  Serial.println("Sending data to API:");
-  Serial.println(jsonPayload);
+  SERIAL_PRINTLN("Sending data to API:");
+  SERIAL_PRINTLN(jsonPayload);
 
   // Retry logic for failed requests
   int httpResponseCode = -1;
@@ -528,17 +617,17 @@ void sendEnergyDataToAPI() {
   
   while (httpResponseCode <= 0 && retries < maxRetries) {
     if (retries > 0) {
-      Serial.print("Retry attempt ");
-      Serial.print(retries);
-      Serial.println("...");
-      delay(1000);  // Wait before retry
+      SERIAL_PRINT("Retry attempt ");
+      SERIAL_PRINT(retries);
+      SERIAL_PRINTLN("...");
+      for (int i = 0; i < 20; i++) { handleKeypad(); delay(50); }  // ~1s, keypad stays responsive
       
       // Recheck WiFi
       if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("WiFi lost during retry, reconnecting...");
+        SERIAL_PRINTLN("WiFi lost during retry, reconnecting...");
         connectWiFi();
         if (WiFi.status() != WL_CONNECTED) {
-          Serial.println("WiFi reconnection failed");
+          SERIAL_PRINTLN("WiFi reconnection failed");
           http.end();
           return;
         }
@@ -550,14 +639,14 @@ void sendEnergyDataToAPI() {
   }
 
   if (httpResponseCode > 0) {
-    Serial.print("HTTP Response code: ");
-    Serial.println(httpResponseCode);
+    SERIAL_PRINT("HTTP Response code: ");
+    SERIAL_PRINTLN(httpResponseCode);
     String response = http.getString();
-    Serial.println("Response: " + response);
+    SERIAL_PRINTLN("Response: " + response);
   } else {
-    Serial.print("Error code: ");
-    Serial.println(httpResponseCode);
-    Serial.println("Failed after retries. WiFi status: " + String(WiFi.status()));
+    SERIAL_PRINT("Error code: ");
+    SERIAL_PRINTLN(httpResponseCode);
+    SERIAL_PRINTLN("Failed after retries. WiFi status: " + String(WiFi.status()));
   }
 
   http.end();
@@ -570,7 +659,7 @@ void sendEnergyDataToAPI() {
  */
 void sendTestDataToAPI() {
   if (!wifiConnected || WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi not connected, skipping test API call");
+    SERIAL_PRINTLN("WiFi not connected, skipping test API call");
     return;
   }
 
@@ -605,22 +694,22 @@ void sendTestDataToAPI() {
   String jsonPayload;
   serializeJson(doc, jsonPayload);
 
-  Serial.println("========================================");
-  Serial.println("Sending TEST data to API:");
-  Serial.println(jsonPayload);
-  Serial.println("========================================");
+  SERIAL_PRINTLN("========================================");
+  SERIAL_PRINTLN("Sending TEST data to API:");
+  SERIAL_PRINTLN(jsonPayload);
+  SERIAL_PRINTLN("========================================");
 
   int httpResponseCode = http.POST(jsonPayload);
 
   if (httpResponseCode > 0) {
-    Serial.print("✅ TEST - HTTP Response code: ");
-    Serial.println(httpResponseCode);
+    SERIAL_PRINT("✅ TEST - HTTP Response code: ");
+    SERIAL_PRINTLN(httpResponseCode);
     String response = http.getString();
-    Serial.println("Response: " + response);
+    SERIAL_PRINTLN("Response: " + response);
   } else {
-    Serial.print("❌ TEST - Error code: ");
-    Serial.println(httpResponseCode);
-    Serial.println("Check server URL and connectivity");
+    SERIAL_PRINT("❌ TEST - Error code: ");
+    SERIAL_PRINTLN(httpResponseCode);
+    SERIAL_PRINTLN("Check server URL and connectivity");
   }
 
   http.end();
@@ -643,7 +732,7 @@ bool checkForPendingToken() {
   String url = String(apiBaseUrl) + "/purchases/pending-token/" + String(METER_NUMBER);
   
   http.begin(url);
-  http.setTimeout(8000);  // 8 second timeout
+  http.setTimeout(2000);  // 2s - fail fast so keypad is not blocked
   http.addHeader("Connection", "close");
 
   int httpResponseCode = http.GET();
@@ -658,8 +747,8 @@ bool checkForPendingToken() {
       float kwhAmount = doc["token"]["kwhAmount"].as<float>();
       String purchaseId = doc["token"]["purchaseId"].as<String>();
 
-      Serial.println("Found pending token: " + tokenNumber);
-      Serial.print("kWh: "); Serial.println(kwhAmount);
+      SERIAL_PRINTLN("Found pending token: " + tokenNumber);
+      SERIAL_PRINT("kWh: "); SERIAL_PRINTLN(kwhAmount);
 
       // Apply the token
       if (applyTokenFromServer(tokenNumber, kwhAmount, purchaseId)) {
@@ -671,8 +760,8 @@ bool checkForPendingToken() {
     // Device will maintain current state and remaining energy
   } else {
     // Only log actual errors, not "no token" responses
-    Serial.print("Error checking pending token: ");
-    Serial.println(httpResponseCode);
+    SERIAL_PRINT("Error checking pending token: ");
+    SERIAL_PRINTLN(httpResponseCode);
   }
 
   http.end();
@@ -689,22 +778,26 @@ bool applyTokenFromServer(String tokenNumber, float kwhAmount, String purchaseId
   if (state == STATE_RUNNING && remaining_kwh > 0) {
     // If already running, add new token energy to existing balance
     remaining_kwh += kwhAmount;
-    Serial.print("Added new token energy. Total remaining: ");
-    Serial.println(remaining_kwh);
+    SERIAL_PRINT("Added new token energy. Total remaining: ");
+    SERIAL_PRINTLN(remaining_kwh);
   } else {
     // Starting fresh or exhausted, set new energy
     remaining_kwh = kwhAmount;
   }
   currentToken = tokenNumber;
+  lastTokenEntered = tokenNumber;
   state = STATE_RUNNING;
   lastMillis = millis();
   sessionStartTime = millis();
   lastDisplayMillis = 0;
   lastApiSendMillis = 0;
-  digitalWrite(LED_PIN, HIGH);
+  session_purchased_kwh = remaining_kwh;  // For consumed display
+  saveRemainingToEEPROM();
+  saveSessionPurchasedToEEPROM();
+  digitalWrite(RELAY_PIN, HIGH);  // Power to load
   
-  Serial.print("Token applied from server, kWh: "); Serial.println(kwhAmount);
-  Serial.print("Token: "); Serial.println(currentToken);
+  SERIAL_PRINT("Token applied from server, kWh: "); SERIAL_PRINTLN(kwhAmount);
+  SERIAL_PRINT("Token: "); SERIAL_PRINTLN(currentToken);
 
   // Show notification on display
   display.clearDisplay();
@@ -725,7 +818,7 @@ bool applyTokenFromServer(String tokenNumber, float kwhAmount, String purchaseId
     display.println(kwhAmount, 2);
   }
   display.display();
-  delay(2000);
+  for (int i = 0; i < 40; i++) { handleKeypad(); delay(50); }  // ~2s, keypad stays responsive
   showRunningScreen();
 
   // Confirm token was applied to server
@@ -733,14 +826,14 @@ bool applyTokenFromServer(String tokenNumber, float kwhAmount, String purchaseId
   String url = String(apiBaseUrl) + "/purchases/confirm-token/" + purchaseId;
   
   http.begin(url);
-  http.setTimeout(5000);
+  http.setTimeout(2000);
   int httpResponseCode = http.POST("{}");
 
   if (httpResponseCode > 0) {
-    Serial.println("Token confirmed on server");
+    SERIAL_PRINTLN("Token confirmed on server");
   } else {
-    Serial.print("Failed to confirm token: ");
-    Serial.println(httpResponseCode);
+    SERIAL_PRINT("Failed to confirm token: ");
+    SERIAL_PRINTLN(httpResponseCode);
   }
   http.end();
 
@@ -767,7 +860,7 @@ bool validateTokenFromServer(String tokenNumber) {
   String url = String(apiBaseUrl) + "/purchases/pending-token/" + String(METER_NUMBER);
   
   http.begin(url);
-  http.setTimeout(5000);
+  http.setTimeout(2000);  // fail fast so keypad stays responsive
 
   int httpResponseCode = http.GET();
 
@@ -799,50 +892,63 @@ void handleKeypad() {
     if (keyIndex == lastKeyIndex && (now - lastKeyMillis) < KEY_DEBOUNCE_MS) return;
     lastKeyIndex = keyIndex;
     lastKeyMillis = now;
+    lastKeypadActivityMillis = now;  // high priority: next 30s skip blocking network
 
     char k = keys[keyIndex / COLS][keyIndex % COLS];
-    Serial.print("Key: "); Serial.println(k);
+    // Always print to Serial for keypad debugging (independent of SERIAL_LOGGING_ENABLED)
+    Serial.print("[KEYPAD] Key pressed: ");
+    Serial.println(k);
+    SERIAL_PRINT("Key: "); SERIAL_PRINTLN(k);
 
-    // Key B: Send test data to API (for testing server)
-    if (k == 'B') {
-      if (wifiConnected) {
-        Serial.println("Key B pressed - Sending test data to API");
-        sendTestDataToAPI();
-        display.clearDisplay();
-        display.setCursor(0,0);
-        display.println("Energy Meter");
-        display.println("----------------");
-        display.println("Test data sent!");
-        display.println("Check Serial");
-        display.display();
-        delay(2000);
-        if (state == STATE_READY) {
-          showReadyScreen();
-        } else {
-          showEnteringScreen();
-        }
-      } else {
-        Serial.println("WiFi not connected - Cannot send test data");
-        display.clearDisplay();
-        display.setCursor(0,0);
-        display.println("Energy Meter");
-        display.println("----------------");
-        display.println("WiFi not connected");
-        display.println("Cannot test API");
-        display.display();
-        delay(2000);
-        if (state == STATE_READY) {
-          showReadyScreen();
-        } else {
-          showEnteringScreen();
-        }
-      }
+    // When showing info screen (C/B/#), any key returns to READY
+    if (state == STATE_INFO_SCREEN) {
+      state = STATE_READY;
+      showReadyScreen();
       return;
     }
-    
-    // Ignore C
-    if (k == 'C') return;
 
+    // EXHAUSTED: A = reset and return to READY (enter new token)
+    if (state == STATE_EXHAUSTED && k == 'A') {
+      inputLen = 0;
+      inputBuf[0] = '\0';
+      state = STATE_READY;
+      showReadyScreen();
+      return;
+    }
+
+    // READY: A = start manual token entry. C = Check Energy, B = Previous token, # * 0 = Meter number
+    if (state == STATE_READY) {
+      if (k == 'A') {
+        state = STATE_ENTERING;
+        inputLen = 0;
+        inputBuf[0] = '\0';
+        showEnteringScreen();
+        return;
+      }
+      if (k == 'C') {
+        showCheckEnergyScreen();
+        state = STATE_INFO_SCREEN;
+        infoScreenStart = now;
+        infoScreenType = 1;
+        return;
+      }
+      if (k == 'B') {
+        showPreviousTokenScreen();
+        state = STATE_INFO_SCREEN;
+        infoScreenStart = now;
+        infoScreenType = 2;
+        return;
+      }
+      if (k == '#' || k == '*' || k == '0') {
+        showMeterNumberScreen();
+        state = STATE_INFO_SCREEN;
+        infoScreenStart = now;
+        infoScreenType = 0;
+        return;
+      }
+    }
+
+    // ENTERING: 0-9 add digit (auto-submit at 20). D = delete, * = backspace. A = cancel.
     if (k >= '0' && k <= '9') {
       if (state == STATE_READY) {
         state = STATE_ENTERING;
@@ -850,37 +956,31 @@ void handleKeypad() {
         inputBuf[0] = '\0';
       }
       if (state == STATE_ENTERING) {
-        // 20 digits total - store only digits in buffer (spaces added only for display)
-        // Format: XXXX XXXX XXXX XXXX XXXX (display format)
-        if (inputLen < 20) {  // Allow up to 20 digits
+        if (inputLen < 20) {
           inputBuf[inputLen++] = k;
           inputBuf[inputLen] = '\0';
           showEnteringScreen();
-          // Auto-submit when 20 digits entered
           if (inputLen == 20) {
-            submitToken();
+            submitToken();  // Auto-validate with server when WiFi available
           }
         }
       }
-    } else if (k == 'D') {
-      if (state == STATE_ENTERING && inputLen >= 20) {  // At least 20 digits
-        submitToken();
-      }
-    } else if (k == 'A') {
-      inputLen = 0; 
-      inputBuf[0] = '\0';
-      remaining_kwh = 0;
-      currentToken = "";
-      state = STATE_READY;
-      digitalWrite(LED_PIN, LOW);
-      showReadyScreen();
-    } else if (k == '*') {
+    } else if (k == 'D' || k == '*') {
+      // D = Delete (backspace), * = backspace
       if (state == STATE_ENTERING && inputLen > 0) {
         inputLen--;
         inputBuf[inputLen] = '\0';
         showEnteringScreen();
         if (inputLen == 0) state = STATE_READY;
       }
+    } else if (k == 'A') {
+      if (state == STATE_ENTERING) {
+        inputLen = 0;
+        inputBuf[0] = '\0';
+        state = STATE_READY;
+        showReadyScreen();
+      }
+      // In READY, A already handled above (start token entry)
     }
   } else {
     lastKeyIndex = 255;
@@ -899,7 +999,7 @@ void submitToken() {
     display.println("Must be 20 digits");
     display.println("Returning...");
     display.display();
-    Serial.println("INVALID TOKEN - Wrong length");
+    SERIAL_PRINTLN("INVALID TOKEN - Wrong length");
     inputLen = 0;
     inputBuf[0] = '\0';
     return;
@@ -924,14 +1024,14 @@ void submitToken() {
 
   // If not found locally, check server if WiFi is available
   if (!found && wifiConnected) {
-    Serial.println("Token not found locally, checking server...");
+    SERIAL_PRINTLN("Token not found locally, checking server...");
     display.clearDisplay();
     display.setCursor(0,0);
     display.println("Checking server...");
     display.display();
     
     if (validateTokenFromServer(tokenString)) {
-      // Token validated and applied by server, return early
+      lastTokenEntered = tokenString;
       inputLen = 0;
       inputBuf[0] = '\0';
       return;
@@ -943,7 +1043,7 @@ void submitToken() {
       display.println("Not found");
       display.println("Returning...");
       display.display();
-      Serial.println("BAD TOKEN - Not found on server either");
+      SERIAL_PRINTLN("BAD TOKEN - Not found on server either");
       inputLen = 0;
       inputBuf[0] = '\0';
       return;
@@ -958,7 +1058,7 @@ void submitToken() {
     display.println("No network");
     display.println("Returning...");
     display.display();
-    Serial.println("BAD TOKEN - Not found locally and no WiFi");
+    SERIAL_PRINTLN("BAD TOKEN - Not found locally and no WiFi");
     inputLen = 0;
     inputBuf[0] = '\0';
     return;
@@ -966,16 +1066,20 @@ void submitToken() {
 
   // Apply token from local database
   remaining_kwh = kwh;
+  session_purchased_kwh = kwh;  // For consumed display
   currentToken = tokenString;
+  lastTokenEntered = tokenString;
   state = STATE_RUNNING;
   lastMillis = millis();
   sessionStartTime = millis();
   lastDisplayMillis = 0;
   lastApiSendMillis = 0;
-  digitalWrite(LED_PIN, HIGH);
+  saveRemainingToEEPROM();
+  saveSessionPurchasedToEEPROM();
+  digitalWrite(RELAY_PIN, HIGH);  // Power to load
   showRunningScreen();
-  Serial.print("Token accepted, kWh: "); Serial.println(kwh);
-  Serial.print("Token: "); Serial.println(currentToken);
+  SERIAL_PRINT("Token accepted, kWh: "); SERIAL_PRINTLN(kwh);
+  SERIAL_PRINT("Token: "); SERIAL_PRINTLN(currentToken);
 
   // Send initial data to API
   if (wifiConnected) {
@@ -995,8 +1099,9 @@ void showReadyScreen() {
   display.print("Meter: ");
   display.println(METER_NUMBER);
   display.println("Status: READY");
-  display.println("");
-  display.println("Enter 20-digit token");
+  display.println("A=Enter token");
+  display.println("C=Energy B=Prev");
+  display.println("# * 0=Meter");
   display.display();
 }
 
@@ -1027,11 +1132,17 @@ void showEnteringScreen() {
   }
   
   display.println("");
-  display.println("D=Submit  A=Clear");
+  display.println("D=Delete *=BkSp A=Cancel");
   display.display();
 }
 
 void showRunningScreen() {
+  // Consumed = session purchased minus remaining (token-based)
+  float consumed_kwh = session_purchased_kwh - remaining_kwh;
+  if (consumed_kwh < 0.0f) consumed_kwh = 0.0f;
+  float sensor_kwh = pzem.energy();
+  float power_w = pzem.power();
+
   display.clearDisplay();
   display.setCursor(0,0);
   display.println("Energy Meter");
@@ -1040,6 +1151,17 @@ void showRunningScreen() {
   if (remaining_kwh < 10.0) display.print(remaining_kwh, 3);
   else display.print(remaining_kwh, 2);
   display.println(" kWh");
+  display.print("Consumed: ");
+  if (consumed_kwh < 10.0) display.print(consumed_kwh, 3);
+  else display.print(consumed_kwh, 2);
+  display.println(" kWh");
+  if (!isnan(sensor_kwh) || !isnan(power_w)) {
+    display.print("E:");
+    if (!isnan(sensor_kwh)) display.print(sensor_kwh, 2); else display.print("-");
+    display.print(" P:");
+    if (!isnan(power_w)) display.print(power_w, 0); else display.print("-");
+    display.println("W");
+  }
   display.print("Meter: ");
   display.println(METER_NUMBER);
   if (wifiConnected) {
@@ -1061,6 +1183,61 @@ void showExhaustedScreen() {
   display.display();
 }
 
+void showMeterNumberScreen() {
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.println("METER NUMBER");
+  display.println("----------------");
+  display.println(METER_NUMBER);
+  display.println("");
+  display.println("(Any key or 5s to return)");
+  display.display();
+}
+
+void showCheckEnergyScreen() {
+  float consumed_kwh = session_purchased_kwh - remaining_kwh;
+  if (consumed_kwh < 0.0f) consumed_kwh = 0.0f;
+  float sensor_kwh = pzem.energy();
+  float power_w = pzem.power();
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.println("CHECK ENERGY");
+  display.println("----------------");
+  display.print("Remaining: ");
+  if (remaining_kwh < 10.0) display.print(remaining_kwh, 3);
+  else display.print(remaining_kwh, 2);
+  display.println(" kWh");
+  display.print("Consumed: ");
+  if (consumed_kwh < 10.0) display.print(consumed_kwh, 3);
+  else display.print(consumed_kwh, 2);
+  display.println(" kWh");
+  if (!isnan(sensor_kwh) || !isnan(power_w)) {
+    display.print("Sensor E:"); if (!isnan(sensor_kwh)) display.print(sensor_kwh, 2); else display.print("-");
+    display.print(" P:"); if (!isnan(power_w)) display.print(power_w, 0); else display.print("-");
+    display.println("W");
+  }
+  display.println("(Any key or 5s to return)");
+  display.display();
+}
+
+void showPreviousTokenScreen() {
+  display.clearDisplay();
+  display.setCursor(0,0);
+  display.println("PREVIOUS TOKEN");
+  display.println("----------------");
+  if (lastTokenEntered.length() == 20) {
+    for (int i = 0; i < 20; i++) {
+      display.print(lastTokenEntered[i]);
+      if ((i + 1) % 4 == 0 && i < 19) display.print(' ');
+    }
+    display.println("");
+  } else {
+    display.println("(none yet)");
+  }
+  display.println("(Any key or 5s to return)");
+  display.display();
+}
+
 void showWiFiConnectingScreen() {
   display.clearDisplay();
   display.setCursor(0,0);
@@ -1071,8 +1248,21 @@ void showWiFiConnectingScreen() {
   display.display();
 }
 
-void blinkLED() {
-  unsigned long t = millis() / 500;
-  if (t % 2 == 0) digitalWrite(LED_PIN, HIGH);
-  else digitalWrite(LED_PIN, LOW);
+// --------------------- EEPROM persistence ------------------
+void loadEnergyFromEEPROM() {
+  float r = 0.0f, s = 0.0f;
+  EEPROM.get(EEPROM_ADDR_REMAINING_KWH, r);
+  EEPROM.get(EEPROM_ADDR_SESSION_PURCHASED, s);
+  if (!isnan(r) && r >= 0.0f) remaining_kwh = r;
+  if (!isnan(s) && s >= 0.0f) session_purchased_kwh = s;
+}
+
+void saveRemainingToEEPROM() {
+  EEPROM.put(EEPROM_ADDR_REMAINING_KWH, remaining_kwh);
+  EEPROM.commit();
+}
+
+void saveSessionPurchasedToEEPROM() {
+  EEPROM.put(EEPROM_ADDR_SESSION_PURCHASED, session_purchased_kwh);
+  EEPROM.commit();
 }

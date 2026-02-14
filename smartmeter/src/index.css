@@ -1,0 +1,561 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Premium Electricity-Themed Design System */
+
+@layer base {
+  :root {
+    /* Core Colors - Electric Red Theme with Electricity Vibes */
+    --background: 0 0% 100%;
+    --foreground: 0 70% 15%;
+    
+    /* Electric Red - Primary Brand Color */
+    --electric-red: 0 85% 60%;
+    --electric-red-dark: 0 85% 45%;
+    --electric-red-light: 0 85% 75%;
+
+    /* Electric Red - Primary Brand Color */
+    --primary: 0 85% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Electric Orange - Secondary Accent */
+    --secondary: 15 90% 55%;
+    --secondary-foreground: 0 0% 100%;
+
+    /* Deep Electric - Professional & Trust */
+    --navy: 0 70% 15%;
+    --navy-light: 0 60% 25%;
+    --navy-foreground: 0 0% 100%;
+
+    /* Electric Yellow - Energy Highlight */
+    --accent: 45 100% 50%;
+    --accent-foreground: 0 70% 15%;
+
+    /* Neutral Grays with Red Tint */
+    --muted: 0 5% 96%;
+    --muted-foreground: 0 8% 46%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 70% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 70% 15%;
+
+    --border: 0 12% 91%;
+    --input: 0 12% 91%;
+    --ring: 0 85% 60%;
+
+    /* Semantic Colors */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 120 60% 50%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 45 93% 58%;
+    --warning-foreground: 0 70% 15%;
+
+    /* Additional Electric Shades */
+    --electric-light: 0 85% 85%;
+    --electric-medium: 0 85% 60%;
+    --electric-dark: 0 85% 35%;
+
+    /* Design Tokens */
+    --radius: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+  }
+
+  .dark {
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+
+    --card: 220 26% 14%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 220 26% 14%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 211 100% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 158 64% 52%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 45 93% 58%;
+    --accent-foreground: 222 47% 11%;
+
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 211 100% 50%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
+    font-variation-settings: 'opsz' 32;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold tracking-tight;
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+  }
+
+  h1 {
+    font-size: clamp(2.25rem, 5vw, 4.5rem);
+    line-height: 1.1;
+  }
+
+  h2 {
+    font-size: clamp(1.875rem, 4vw, 3rem);
+    line-height: 1.2;
+  }
+
+  h3 {
+    font-size: clamp(1.5rem, 3vw, 2.25rem);
+    line-height: 1.3;
+  }
+
+  h4 {
+    font-size: clamp(1.25rem, 2vw, 1.5rem);
+  }
+}
+
+@layer utilities {
+  /* Premium Electric Red Gradients - Electric themed */
+  .gradient-electric {
+    background: linear-gradient(135deg, hsl(0, 85%, 60%) 0%, hsl(15, 90%, 55%) 100%);
+  }
+
+  .gradient-energy {
+    background: linear-gradient(135deg, hsl(0, 85%, 65%) 0%, hsl(0, 85%, 45%) 100%);
+  }
+
+  .gradient-dark {
+    background: linear-gradient(135deg, hsl(0, 70%, 15%) 0%, hsl(0, 60%, 25%) 100%);
+  }
+  
+  /* Electricity Background Patterns */
+  .electricity-bg {
+    background-image: 
+      radial-gradient(circle at 25% 25%, rgba(255, 0, 0, 0.1) 0%, transparent 50%),
+      radial-gradient(circle at 75% 75%, rgba(255, 165, 0, 0.1) 0%, transparent 50%),
+      linear-gradient(45deg, transparent 40%, rgba(255, 255, 0, 0.05) 50%, transparent 60%),
+      url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48cGF0dGVybiBpZD0iZWxlY3RyaWMtbWV0ZXIiIHBhdHRlcm5Vbml0cz0idXNlclNwYWNlT25Vc2UiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgyNTUsIDAsIDAsIDAuMDUpIiBzdHJva2Utd2lkdGg9IjIiLz48Y2lyY2xlIGN4PSIzMCIgY3k9IjMwIiByPSIxMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJyZ2JhKDI1NSwgMTY1LCAwLCAwLjAzKSIgc3Ryb2tlLXdpZHRoPSIxIi8+PGxpbmUgeDE9IjMwIiB5MT0iMTAiIHgyPSIzMCIgeTI9IjE1IiBzdHJva2U9InJnYmEoMjU1LCAwLCAwLCAwLjA4KSIgc3Ryb2tlLXdpZHRoPSIyIi8+PGxpbmUgeDE9IjMwIiB5MT0iNDUiIHgyPSIzMCIgeTI9IjUwIiBzdHJva2U9InJnYmEoMjU1LCAwLCAwLCAwLjA4KSIgc3Ryb2tlLXdpZHRoPSIyIi8+PGxpbmUgeDE9IjEwIiB5MT0iMzAiIHgyPSIxNSIgeTI9IjMwIiBzdHJva2U9InJnYmEoMjU1LCAwLCAwLCAwLjA4KSIgc3Ryb2tlLXdpZHRoPSIyIi8+PGxpbmUgeDE9IjQ1IiB5MT0iMzAiIHgyPSI1MCIgeTI9IjMwIiBzdHJva2U9InJnYmEoMjU1LCAwLCAwLCAwLjA4KSIgc3Ryb2tlLXdpZHRoPSIyIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2VsZWN0cmljLW1ldGVyKSIvPjwvc3ZnPg==');
+    background-size: 300px 300px, 400px 400px, 100% 100%, 60px 60px;
+  }
+  
+  .meter-pattern {
+    background-image: 
+      repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(255, 0, 0, 0.05) 10px, rgba(255, 0, 0, 0.05) 20px),
+      repeating-linear-gradient(-45deg, transparent, transparent 10px, rgba(255, 165, 0, 0.03) 10px, rgba(255, 165, 0, 0.03) 20px),
+      url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48cGF0dGVybiBpZD0ibWV0ZXItZ3JpZCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIj48cGF0aCBkPSJNIDQwIDAgTCAwIDAgMCA0MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJyZ2JhKDI1NSwgMCwgMCwgMC4wMykiIHN0cm9rZS13aWR0aD0iMSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNtZXRlci1ncmlkKSIvPjwvc3ZnPg==');
+    background-size: 20px 20px, 25px 25px, 40px 40px;
+  }
+  
+  .electric-circuit {
+    background-image: 
+      url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48cGF0dGVybiBpZD0iY2lyY3VpdCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgd2lkdGg9IjEwMCIgaGVpZ2h0PSIxMDAiPjxwYXRoIGQ9Ik0wIDUwIEwyNSA1MCBMMjUgMjUgTDc1IDI1IEw3NSA3NSBMMTAwIDc1IiBmaWxsPSJub25lIiBzdHJva2U9InJnYmEoMjU1LCAwLCAwLCAwLjA2KSIgc3Ryb2tlLXdpZHRoPSIyIi8+PGNpcmNsZSBjeD0iMjUiIGN5PSIyNSIgcj0iMyIgZmlsbD0icmdiYSgyNTUsIDAsIDAsIDAuMSkiLz48Y2lyY2xlIGN4PSI3NSIgY3k9Ijc1IiByPSIzIiBmaWxsPSJyZ2JhKDI1NSwgMTY1LCAwLCAwLjEpIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2NpcmN1aXQpIi8+PC9zdmc+');
+    background-size: 100px 100px;
+  }
+
+  .gradient-mesh {
+    background: 
+      radial-gradient(at 40% 20%, hsla(0, 85%, 60%, 0.15) 0px, transparent 50%),
+      radial-gradient(at 80% 0%, hsla(15, 90%, 55%, 0.12) 0px, transparent 50%),
+      radial-gradient(at 0% 50%, hsla(45, 100%, 50%, 0.1) 0px, transparent 50%);
+  }
+
+  .gradient-electric-vibrant {
+    background: linear-gradient(135deg, hsl(0, 85%, 60%) 0%, hsl(0, 85%, 70%) 100%);
+  }
+
+  .gradient-electric-deep {
+    background: linear-gradient(135deg, hsl(0, 85%, 45%) 0%, hsl(0, 70%, 15%) 100%);
+  }
+
+  .gradient-electric-glow {
+    background: linear-gradient(135deg, hsl(15, 90%, 55%) 0%, hsl(0, 85%, 60%) 50%, hsl(45, 100%, 50%) 100%);
+  }
+
+  /* Glass Morphism */
+  .glass {
+    @apply bg-white/80 backdrop-blur-xl border border-white/20;
+  }
+
+  .glass-dark {
+    @apply bg-navy/80 backdrop-blur-xl border border-white/10;
+  }
+
+  /* Electric Red-themed Shadows */
+  .shadow-electric {
+    box-shadow: 
+      0 0 0 1px hsl(0 85% 60% / 0.1),
+      0 10px 40px -10px hsl(0 85% 60% / 0.3),
+      0 0 60px -20px hsl(0 85% 60% / 0.2);
+  }
+
+  .shadow-energy {
+    box-shadow: 
+      0 0 0 1px hsl(15 90% 55% / 0.1),
+      0 10px 40px -10px hsl(15 90% 55% / 0.25),
+      0 0 60px -20px hsl(15 90% 55% / 0.15);
+  }
+
+  .shadow-electric-glow {
+    box-shadow: 
+      0 0 0 1px hsl(0 85% 60% / 0.15),
+      0 20px 60px -15px hsl(0 85% 60% / 0.4),
+      0 0 80px -25px hsl(45 100% 50% / 0.3);
+  }
+
+  .shadow-premium {
+    box-shadow: 
+      0 0 0 1px hsl(220 13% 91% / 1),
+      0 20px 60px -15px hsl(222 47% 11% / 0.15),
+      0 0 1px hsl(222 47% 11% / 0.05);
+  }
+
+  /* Animations */
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-20px); }
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  @keyframes slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes slide-in-left {
+    from {
+      opacity: 0;
+      transform: translateX(-50px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes slide-in-right {
+    from {
+      opacity: 0;
+      transform: translateX(50px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes scale-in {
+    from {
+      opacity: 0;
+      transform: scale(0.9);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes rotate-slow {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -1000px 0; }
+    100% { background-position: 1000px 0; }
+  }
+
+  @keyframes glow-pulse {
+    0%, 100% {
+      box-shadow: 0 0 20px rgba(255, 0, 0, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 40px rgba(255, 0, 0, 0.8), 0 0 60px rgba(255, 165, 0, 0.4);
+    }
+  }
+
+  @keyframes bounce-slow {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+
+  @keyframes slide-up-fade {
+    0% {
+      opacity: 0;
+      transform: translateY(40px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes gradient-shift {
+    0%, 100% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+  }
+
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  .animate-pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  .animate-slide-up {
+    animation: slide-up 0.6s ease-out;
+  }
+
+  .animate-fade-in {
+    animation: fade-in 0.5s ease-out;
+  }
+
+  .animate-slide-in-left {
+    animation: slide-in-left 0.7s ease-out;
+  }
+
+  .animate-slide-in-right {
+    animation: slide-in-right 0.7s ease-out;
+  }
+
+  .animate-scale-in {
+    animation: scale-in 0.5s ease-out;
+  }
+
+  .animate-rotate-slow {
+    animation: rotate-slow 20s linear infinite;
+  }
+
+  .animate-shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.1) 50%,
+      transparent 100%
+    );
+    background-size: 1000px 100%;
+    animation: shimmer 3s infinite;
+  }
+
+  .animate-glow-pulse {
+    animation: glow-pulse 3s ease-in-out infinite;
+  }
+
+  .animate-bounce-slow {
+    animation: bounce-slow 3s ease-in-out infinite;
+  }
+
+  .animate-slide-up-fade {
+    animation: slide-up-fade 0.8s ease-out;
+  }
+
+  .animate-gradient-shift {
+    background-size: 200% 200%;
+    animation: gradient-shift 8s ease infinite;
+  }
+
+  /* Electricity-themed animations */
+  @keyframes electric-pulse {
+    0%, 100% {
+      box-shadow: 0 0 5px hsl(0 85% 60% / 0.5), 0 0 10px hsl(0 85% 60% / 0.3);
+    }
+    50% {
+      box-shadow: 0 0 20px hsl(0 85% 60% / 0.8), 0 0 30px hsl(15 90% 55% / 0.5), 0 0 40px hsl(45 100% 50% / 0.3);
+    }
+  }
+
+  @keyframes electric-spark {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.1); }
+  }
+
+  @keyframes lightning-flash {
+    0%, 100% { opacity: 0; }
+    10%, 20% { opacity: 1; }
+    30%, 50% { opacity: 0; }
+    60%, 70% { opacity: 1; }
+    80%, 100% { opacity: 0; }
+  }
+  
+  @keyframes meter-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
+  @keyframes voltage-pulse {
+    0%, 100% {
+      box-shadow: 0 0 10px rgba(255, 0, 0, 0.3), inset 0 0 10px rgba(255, 165, 0, 0.2);
+    }
+    50% {
+      box-shadow: 0 0 30px rgba(255, 0, 0, 0.6), inset 0 0 20px rgba(255, 165, 0, 0.4), 0 0 50px rgba(255, 255, 0, 0.3);
+    }
+  }
+
+  @keyframes energy-flow {
+    0% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+    100% {
+      background-position: 0% 50%;
+    }
+  }
+
+  @keyframes charge-up {
+    0% {
+      transform: translateY(20px);
+      opacity: 0;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(-20px);
+      opacity: 0;
+    }
+  }
+
+  .animate-electric-pulse {
+    animation: electric-pulse 2s ease-in-out infinite;
+  }
+
+  .animate-electric-spark {
+    animation: electric-spark 1.5s ease-in-out infinite;
+  }
+
+  .animate-lightning-flash {
+    animation: lightning-flash 4s ease-in-out infinite;
+  }
+
+  .animate-energy-flow {
+    background-size: 200% 200%;
+    animation: energy-flow 3s ease infinite;
+  }
+
+  .animate-charge-up {
+    animation: charge-up 2s ease-in-out infinite;
+  }
+  
+  .animate-meter-spin {
+    animation: meter-spin 10s linear infinite;
+  }
+  
+  .animate-voltage-pulse {
+    animation: voltage-pulse 2.5s ease-in-out infinite;
+  }
+
+  /* Hover Effects */
+  .hover-lift {
+    @apply transition-all duration-300;
+  }
+
+  .hover-lift:hover {
+    @apply -translate-y-2 shadow-premium;
+  }
+
+  .hover-glow {
+    @apply transition-all duration-300;
+  }
+
+  .hover-glow:hover {
+    @apply shadow-electric-glow;
+  }
+
+  .hover-scale {
+    @apply transition-transform duration-300;
+  }
+
+  .hover-scale:hover {
+    @apply scale-105;
+  }
+
+  .hover-rotate {
+    @apply transition-transform duration-500;
+  }
+
+  .hover-rotate:hover {
+    @apply rotate-3;
+  }
+
+  /* Electric Red Text Gradients */
+  .text-gradient-electric {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(0, 85%, 60%) 0%, hsl(15, 90%, 55%) 100%);
+  }
+
+  .text-gradient-energy {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(0, 85%, 65%) 0%, hsl(0, 85%, 45%) 100%);
+  }
+
+  .text-gradient-electric-glow {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(15, 90%, 55%) 0%, hsl(0, 85%, 60%) 50%, hsl(45, 100%, 50%) 100%);
+  }
+
+  /* Custom Scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-muted rounded-full;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-primary/30 rounded-full;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-primary/50;
+  }
+}
