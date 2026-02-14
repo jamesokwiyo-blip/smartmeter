@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Zap, LogOut, User, CreditCard, History, Copy, Check, Smartphone, Wallet, Building2, X, ArrowRight, TrendingUp, Clock, Shield, Battery, BatteryCharging, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Camera, Upload } from "lucide-react";
-import { purchasesAPI } from "@/lib/api";
+import { Zap, User, CreditCard, History, Copy, Check, Smartphone, Wallet, Building2, X, ArrowRight, TrendingUp, Shield, Battery, BatteryCharging, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Camera, Upload } from "lucide-react";
+import { purchasesAPI, energyDataAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,19 +35,22 @@ const Dashboard = () => {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("buy");
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastPurchase, setLastPurchase] = useState<Purchase | null>(null);
   const [error, setError] = useState("");
-  const [remainingKwh, setRemainingKwh] = useState(45.8);
-  const [usedKwh, setUsedKwh] = useState(54.2);
+  const [remainingKwh, setRemainingKwh] = useState(0);
   const [profilePicture, setProfilePicture] = useState<string>("");
+  const [lastEnergyData, setLastEnergyData] = useState<{
+    remainingKwh?: number;
+    totalEnergy?: number;
+    voltage?: number;
+    power?: number;
+    serverTimestamp?: string;
+  } | null>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const conversionRate = 125;
-  const totalCapacity = remainingKwh + usedKwh;
-  const usagePercentage = (usedKwh / totalCapacity) * 100;
 
   const validatePhoneNumber = (phone: string): boolean => {
     // Remove any spaces or special characters
@@ -57,10 +60,9 @@ const Dashboard = () => {
   };
 
   const validateMeterNumber = (meter: string): boolean => {
-    // Remove any spaces or special characters
+    // Remove any spaces or special characters (matches ESP32 METER_NUMBER: 13 digits)
     const cleanMeter = meter.replace(/\s+/g, '').replace(/[^\d]/g, '');
-    // Check if it's exactly 11 digits
-    return cleanMeter.length === 11;
+    return cleanMeter.length === 13;
   };
 
   const scrollTable = (direction: 'left' | 'right' | 'up' | 'down') => {
@@ -100,17 +102,88 @@ const Dashboard = () => {
     }
   }, [navigate]);
 
+  // Reload purchase history periodically to ensure fresh data
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(() => {
+      loadPurchaseHistory();
+    }, 30000); // Refresh every 30 seconds
+    
+    return () => clearInterval(interval);
+  }, [user]);
+
+  const loadEnergyDataForMeter = async (meter: string) => {
+    const trimmed = meter.replace(/\s+/g, "").replace(/[^\d]/g, "");
+    if (!trimmed || trimmed.length < 11) return;
+    try {
+      const res = await energyDataAPI.getLatestByMeter(trimmed);
+      if (res.data?.success && res.data?.data) {
+        const d = res.data.data;
+        // Update remaining kWh from ESP32 data
+        if (typeof d.remainingKwh === "number") {
+          setRemainingKwh(d.remainingKwh);
+        }
+        setLastEnergyData({
+          remainingKwh: d.remainingKwh,
+          totalEnergy: d.totalEnergy,
+          voltage: d.voltage,
+          power: d.power,
+          serverTimestamp: d.serverTimestamp,
+        });
+      }
+    } catch (_) {
+      setLastEnergyData(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!user || !meterNumber) return;
+    loadEnergyDataForMeter(meterNumber);
+    
+    // Refresh energy data every 10 seconds for real-time updates
+    const interval = setInterval(() => {
+      loadEnergyDataForMeter(meterNumber);
+    }, 10000);
+    
+    return () => clearInterval(interval);
+  }, [user, meterNumber]);
+
+  useEffect(() => {
+    if (!user) return;
+    const loadMetersAndDefault = async () => {
+      try {
+        const res = await purchasesAPI.getMeters();
+        if (res.data?.success && res.data?.meters?.length > 0) {
+          setMeterNumber((prev) => (prev ? prev : res.data.meters[0].meterNumber));
+        }
+      } catch (_) {}
+    };
+    loadMetersAndDefault();
+  }, [user]);
+
   const loadPurchaseHistory = async () => {
     try {
       console.log("Loading purchase history...");
       const response = await purchasesAPI.getHistory();
       console.log("Purchase history response:", response.data);
-      if (response.data.success) {
-        setPurchases(response.data.purchases);
+      if (response.data.success && response.data.purchases) {
+        // Ensure purchases have valid numeric values
+        const validPurchases = response.data.purchases.map((p: any) => ({
+          ...p,
+          amount: typeof p.amount === 'number' ? p.amount : parseFloat(p.amount) || 0,
+          kwh: typeof p.kwh === 'number' ? p.kwh : parseFloat(p.kwh) || 0,
+        }));
+        console.log("Valid purchases:", validPurchases);
+        console.log("Total purchases count:", validPurchases.length);
+        setPurchases(validPurchases);
+      } else {
+        console.warn("No purchases found or invalid response");
+        setPurchases([]);
       }
     } catch (error: any) {
       console.error("Failed to load purchase history:", error);
       console.error("Error details:", error.response?.data);
+      setPurchases([]); // Set empty array on error
     }
   };
 
@@ -124,7 +197,7 @@ const Dashboard = () => {
     }
     
     if (!validateMeterNumber(meterNumber)) {
-      setError("Meter number must be exactly 11 digits");
+      setError("Meter number must be exactly 13 digits");
       return;
     }
     
@@ -180,10 +253,10 @@ const Dashboard = () => {
 
       if (response.data.success) {
         const purchase = response.data.purchase;
-        const purchasedKwh = purchase.kwhAmount;
         
-        // Add purchased kWh to remaining balance
-        setRemainingKwh(prev => prev + purchasedKwh);
+        // Don't optimistically update remainingKwh here - let ESP32 be the source of truth
+        // The ESP32 will add the new token to existing remaining energy automatically
+        // We'll refresh the energy data after a short delay to get the updated value
         
         setLastPurchase({
           id: purchase.id,
@@ -206,6 +279,14 @@ const Dashboard = () => {
         setPaymentMethod("");
         
         await loadPurchaseHistory();
+        
+        // Refresh energy data after purchase to get updated remaining energy from ESP32
+        // ESP32 should have added the new token to existing remaining energy
+        setTimeout(() => {
+          if (meterNumber) {
+            loadEnergyDataForMeter(meterNumber);
+          }
+        }, 2000); // Wait 2 seconds for ESP32 to apply token
       }
     } catch (error: any) {
       console.error("Purchase error:", error);
@@ -215,12 +296,6 @@ const Dashboard = () => {
     } finally {
       setIsProcessing(false);
     }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem("user");
-    localStorage.removeItem("authToken");
-    navigate("/");
   };
 
   const handleProfilePictureUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -278,8 +353,43 @@ const Dashboard = () => {
   };
 
   const kwh = amount ? (parseFloat(amount) / conversionRate).toFixed(2) : "0";
-  const totalSpent = purchases.reduce((sum, p) => sum + p.amount, 0);
-  const totalKwh = purchases.reduce((sum, p) => sum + p.kwh, 0);
+  
+  // Calculate real values from database
+  // Ensure we're using actual numeric values from purchases array
+  const totalKwhPurchased = purchases.reduce((sum, p) => {
+    const kwh = typeof p.kwh === 'number' ? p.kwh : parseFloat(String(p.kwh)) || 0;
+    return sum + kwh;
+  }, 0);
+  
+  const totalSpent = purchases.reduce((sum, p) => {
+    const amount = typeof p.amount === 'number' ? p.amount : parseFloat(String(p.amount)) || 0;
+    return sum + amount;
+  }, 0);
+  
+  // Debug logging (can be removed in production)
+  if (purchases.length > 0) {
+    console.log("Purchase calculations:", {
+      purchasesCount: purchases.length,
+      totalKwhPurchased,
+      totalSpent,
+      samplePurchase: purchases[0]
+    });
+  }
+  
+  // Energy Consumed = Total Purchased - Remaining (from ESP32)
+  // ESP32's remainingKwh is the source of truth - it includes all applied tokens
+  // When a new purchase is made:
+  // - ESP32 adds the new token energy to existing remaining energy
+  // - Example: 50 kWh remaining + 80 kWh purchase = 130 kWh remaining on ESP32
+  // - consumed = totalPurchased (130) - remaining (130) = 0 (correct, nothing consumed yet)
+  // - If user consumed 20 kWh: remaining = 110, consumed = 130 - 110 = 20 (correct)
+  const calculatedUsedKwh = Math.max(0, totalKwhPurchased - remainingKwh);
+  
+  // Total capacity is the sum of all purchases (this is what was purchased)
+  // Remaining is what's left on the meter (from ESP32, includes all applied tokens)
+  // Used is the difference (what has been consumed)
+  const totalCapacity = totalKwhPurchased || (remainingKwh + calculatedUsedKwh); // Fallback if no purchases
+  const usagePercentage = totalCapacity > 0 ? (calculatedUsedKwh / totalCapacity) * 100 : 0;
 
   if (!user) return null;
 
@@ -357,7 +467,7 @@ const Dashboard = () => {
                       </div>
                       <p className="text-sm font-medium text-muted-foreground">Energy Consumed</p>
                     </div>
-                    <p className="text-5xl font-bold text-accent mb-1">{usedKwh.toFixed(1)}</p>
+                    <p className="text-5xl font-bold text-accent mb-1">{calculatedUsedKwh.toFixed(1)}</p>
                     <p className="text-lg text-muted-foreground">kWh used</p>
                   </div>
                 </div>
@@ -397,7 +507,11 @@ const Dashboard = () => {
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-navy">Meter Status: Active</p>
-                      <p className="text-xs text-muted-foreground">Last updated: Just now</p>
+                      <p className="text-xs text-muted-foreground">
+                      Last updated: {lastEnergyData?.serverTimestamp
+                        ? new Date(lastEnergyData.serverTimestamp).toLocaleString()
+                        : "Just now"}
+                    </p>
                     </div>
                   </div>
                   {remainingKwh < 20 && (
@@ -438,7 +552,7 @@ const Dashboard = () => {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Total kWh</p>
-                  <p className="text-2xl font-bold text-primary group-hover:scale-110 transition-transform duration-300">{totalKwh.toFixed(2)} kWh</p>
+                  <p className="text-2xl font-bold text-primary group-hover:scale-110 transition-transform duration-300">{totalKwhPurchased.toFixed(2)} kWh</p>
                 </div>
               </div>
               <div className="absolute bottom-2 left-2 w-1 h-1 bg-accent rounded-full animate-electric-spark opacity-0 group-hover:opacity-100" style={{ animationDelay: '0.2s' }}></div>
@@ -477,16 +591,16 @@ const Dashboard = () => {
                 <div className="space-y-6 relative z-10">
                   {/* Meter Number */}
                   <div className="relative z-10">
-                    <Label htmlFor="meterNumber" className="text-navy font-medium">Meter Number (11 digits)</Label>
+                    <Label htmlFor="meterNumber" className="text-navy font-medium">Meter Number (13 digits)</Label>
                     <Input
                       id="meterNumber"
-                      placeholder="Enter 11-digit meter number"
+                      placeholder="e.g. 0215002079873"
                       value={meterNumber}
                       onChange={(e) => setMeterNumber(e.target.value)}
                       className="mt-2 h-12 border-2 focus:border-primary relative z-10"
-                      maxLength={11}
+                      maxLength={13}
                     />
-                    <p className="text-xs text-muted-foreground mt-1">Enter your 11-digit smart meter number</p>
+                    <p className="text-xs text-muted-foreground mt-1">Enter your 13-digit smart meter number (matches meter device)</p>
                   </div>
 
                   {/* Amount */}
@@ -698,7 +812,11 @@ const Dashboard = () => {
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                       <span className="text-sm font-medium text-green-800">Voltage Level</span>
                     </div>
-                    <span className="text-xs font-bold text-green-600">NORMAL</span>
+                    <span className="text-xs font-bold text-green-600">
+                      {typeof lastEnergyData?.voltage === "number"
+                        ? `${lastEnergyData.voltage.toFixed(1)} V`
+                        : "NORMAL"}
+                    </span>
                   </div>
                   
                   <div className="flex items-center justify-between p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
@@ -720,8 +838,15 @@ const Dashboard = () => {
                 
                 <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                   <p className="text-xs text-blue-700 text-center">
-                    Last diagnostic: 2 minutes ago
+                    {lastEnergyData?.serverTimestamp
+                      ? `Last diagnostic: ${new Date(lastEnergyData.serverTimestamp).toLocaleString()}`
+                      : "Last diagnostic: 2 minutes ago"}
                   </p>
+                  {typeof lastEnergyData?.power === "number" && (
+                    <p className="text-xs text-blue-700 text-center mt-1">
+                      Power: {lastEnergyData.power.toFixed(1)} W
+                    </p>
+                  )}
                 </div>
               </Card>
               
