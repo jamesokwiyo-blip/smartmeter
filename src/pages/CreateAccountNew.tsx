@@ -74,10 +74,8 @@ const CreateAccount = () => {
         }, 1500);
       }
     } catch (error: any) {
-      const errorMessage = error.response?.data?.error || error.message || "Registration failed. Please try again.";
-      console.error('Registration error:', error);
       setErrors({
-        submit: errorMessage,
+        submit: error.response?.data?.error || "Registration failed. Please try again.",
       });
     } finally {
       setIsLoading(false);
