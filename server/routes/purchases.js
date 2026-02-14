@@ -5,16 +5,30 @@ import crypto from 'crypto';
 
 const router = express.Router();
 
-// Generate 20-digit numeric token only (matches ESP32 format, e.g. 18886583547834136861)
+/**
+ * Generate 20-digit numeric token for electricity purchase
+ * Format: 20 digits (0-9 only), e.g., "08574635475645364537"
+ * This matches the ESP32 meter format and replaces old alphanumeric tokens
+ * 
+ * @returns {Object} Object containing tokenNumber (20 digits) and rechargeCode
+ */
 function generateTokenAndCode() {
   const digits = '0123456789';
   let token20 = '';
   const bytes = crypto.randomBytes(20);
+  
+  // Generate exactly 20 random digits
   for (let i = 0; i < 20; i++) {
     token20 += digits[bytes[i] % 10];
   }
+  
+  // Validate: ensure token is exactly 20 numeric digits
+  if (!/^\d{20}$/.test(token20)) {
+    throw new Error('Token generation failed: invalid format');
+  }
+  
   return {
-    tokenNumber: token20,
+    tokenNumber: token20,  // e.g., "08574635475645364537"
     rechargeCode: `${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
   };
 }
