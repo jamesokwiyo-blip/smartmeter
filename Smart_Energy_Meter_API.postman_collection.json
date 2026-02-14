@@ -1,0 +1,280 @@
+{
+	"info": {
+		"_postman_id": "smart-energy-meter-api",
+		"name": "Smart Energy Meter API",
+		"description": "Collection for testing Smart Energy Meter API endpoints",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Health Check",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:3000/api/health",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"health"
+					]
+				},
+				"description": "Check if the API is running and healthy"
+			},
+			"response": []
+		},
+		{
+			"name": "Send Energy Data",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"meterNumber\": \"0215002079873\",\n  \"token\": \"18886583547834136861\",\n  \"clientName\": \"YUMVUHORE\",\n  \"clientTIN\": \"\",\n  \"clientPhone\": \"0782946444\",\n  \"remainingKwh\": 4.523,\n  \"sessionDuration\": 120,\n  \"voltage\": 230.5,\n  \"current\": 5.2,\n  \"power\": 1200.0,\n  \"totalEnergy\": 150.5,\n  \"frequency\": 50.0,\n  \"powerFactor\": 0.95,\n  \"timestamp\": 1703123456789\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/energy-data",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"energy-data"
+					]
+				},
+				"description": "Send energy meter data from ESP32 device"
+			},
+			"response": []
+		},
+		{
+			"name": "Send Energy Data (Minimal)",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"meterNumber\": \"0215002079873\",\n  \"token\": \"18886583547834136861\",\n  \"clientName\": \"YUMVUHORE\",\n  \"clientPhone\": \"0782946444\",\n  \"remainingKwh\": 4.523,\n  \"sessionDuration\": 120\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/energy-data",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"energy-data"
+					]
+				},
+				"description": "Send energy data with only required fields"
+			},
+			"response": []
+		},
+		{
+			"name": "Get All Energy Data",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:3000/api/energy-data",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"energy-data"
+					]
+				},
+				"description": "Retrieve all energy data"
+			},
+			"response": []
+		},
+		{
+			"name": "Get Energy Data (Filtered)",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:3000/api/energy-data?meterNumber=0215002079873&limit=5",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"energy-data"
+					],
+					"query": [
+						{
+							"key": "meterNumber",
+							"value": "0215002079873"
+						},
+						{
+							"key": "limit",
+							"value": "5"
+						}
+					]
+				},
+				"description": "Get energy data filtered by meter number"
+			},
+			"response": []
+		},
+		{
+			"name": "Get Meter Data",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:3000/api/energy-data/0215002079873",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"energy-data",
+						"0215002079873"
+					]
+				},
+				"description": "Get latest energy data for a specific meter"
+			},
+			"response": []
+		},
+		{
+			"name": "Error Test - Missing Fields",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"meterNumber\": \"0215002079873\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/energy-data",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"energy-data"
+					]
+				},
+				"description": "Test error handling for missing required fields"
+			},
+			"response": []
+		},
+		{
+			"name": "Error Test - Invalid Meter Number",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"meterNumber\": \"12345\",\n  \"token\": \"18886583547834136861\",\n  \"clientName\": \"YUMVUHORE\",\n  \"clientPhone\": \"0782946444\",\n  \"remainingKwh\": 4.523,\n  \"sessionDuration\": 120\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/energy-data",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"energy-data"
+					]
+				},
+				"description": "Test error handling for invalid meter number format"
+			},
+			"response": []
+		},
+		{
+			"name": "Error Test - Invalid Token",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"meterNumber\": \"0215002079873\",\n  \"token\": \"12345\",\n  \"clientName\": \"YUMVUHORE\",\n  \"clientPhone\": \"0782946444\",\n  \"remainingKwh\": 4.523,\n  \"sessionDuration\": 120\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:3000/api/energy-data",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "3000",
+					"path": [
+						"api",
+						"energy-data"
+					]
+				},
+				"description": "Test error handling for invalid token format"
+			},
+			"response": []
+		}
+	]
+}
