@@ -7,8 +7,11 @@ const router = express.Router();
 
 // Generate unique token and recharge code
 function generateTokenAndCode() {
+  // Generate 20-digit token number
+  const tokenNumber = Array.from({ length: 20 }, () => Math.floor(Math.random() * 10)).join('');
+  
   return {
-    tokenNumber: crypto.randomBytes(6).toString('hex').toUpperCase(),
+    tokenNumber,
     rechargeCode: `${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
   };
 }
