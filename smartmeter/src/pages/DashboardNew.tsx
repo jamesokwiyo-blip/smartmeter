@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Zap, LogOut, User, CreditCard, History, Copy, Check, Smartphone, Wallet, Building2, X, ArrowRight, TrendingUp, Clock, Shield, Battery, BatteryCharging, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Camera, Upload } from "lucide-react";
+import { Zap, LogOut, User, CreditCard, History, Copy, Check, Smartphone, Wallet, Building2, X, ArrowRight, TrendingUp, Clock, Shield, Battery, BatteryCharging, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Camera, Upload, Activity, Gauge, Thermometer, Radio } from "lucide-react";
 import { purchasesAPI, energyAPI, type EnergyData } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,22 +39,36 @@ const Dashboard = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [lastPurchase, setLastPurchase] = useState<Purchase | null>(null);
   const [error, setError] = useState("");
-  const [remainingKwh, setRemainingKwh] = useState(45.8);
-  const [usedKwh, setUsedKwh] = useState(54.2);
+  const [remainingKwh, setRemainingKwh] = useState(0);
+  const [usedKwh, setUsedKwh] = useState(0);
   const [profilePicture, setProfilePicture] = useState<string>("");
   const [energyData, setEnergyData] = useState<EnergyData | null>(null);
   const [diagnosticMeterNumber, setDiagnosticMeterNumber] = useState("");
+  const [liveScreenIdx, setLiveScreenIdx] = useState(0); // rotating live readings carousel
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const conversionRate = 125;
-  // Use real-time energy data when available (from device), else fallback to state
+
+  // Real-time values — prefer live device data, fallback to zeros
   const displayRemaining = energyData?.remainingKwh ?? remainingKwh;
-  const displayUsed = energyData?.consumedKwh ?? usedKwh;
+  const displayUsed = energyData?.consumedKwh ?? usedKwh;        // session consumed (purchased - remaining)
+  const displayTotalEnergy = energyData?.totalEnergy ?? null;    // PZEM cumulative kWh since meter start
   const totalCapacity = displayRemaining + displayUsed;
   const usagePercentage = totalCapacity > 0 ? (displayUsed / totalCapacity) * 100 : 0;
   const lastUpdateText = energyData?.timestampFormatted || energyData?.serverTimestamp || (energyData ? "Just now" : "—");
   const statusMeterId = energyData?.meterNumber || meterNumber || "Enter meter number";
+
+  // Live sensor screens for carousel (rotate every 4s)
+  const liveScreens = [
+    { label: "Voltage", value: energyData?.voltage != null ? `${energyData.voltage.toFixed(1)} V` : "—", icon: "V", color: "text-blue-600", bg: "bg-blue-50 border-blue-200" },
+    { label: "Current", value: energyData?.current != null ? `${energyData.current.toFixed(2)} A` : "—", icon: "I", color: "text-orange-600", bg: "bg-orange-50 border-orange-200" },
+    { label: "Active Power", value: energyData?.power != null ? `${energyData.power.toFixed(1)} W` : "—", icon: "P", color: "text-red-600", bg: "bg-red-50 border-red-200" },
+    { label: "Sensor Energy", value: energyData?.totalEnergy != null ? `${energyData.totalEnergy.toFixed(3)} kWh` : "—", icon: "E", color: "text-emerald-600", bg: "bg-emerald-50 border-emerald-200" },
+    { label: "Frequency", value: energyData?.frequency != null ? `${energyData.frequency.toFixed(2)} Hz` : "—", icon: "F", color: "text-purple-600", bg: "bg-purple-50 border-purple-200" },
+    { label: "Power Factor", value: energyData?.powerFactor != null ? energyData.powerFactor.toFixed(2) : "—", icon: "PF", color: "text-indigo-600", bg: "bg-indigo-50 border-indigo-200" },
+    { label: "Last Update", value: lastUpdateText, icon: "T", color: "text-slate-600", bg: "bg-slate-50 border-slate-200" },
+  ];
 
   const validatePhoneNumber = (phone: string): boolean => {
     // Remove any spaces or special characters
@@ -136,6 +150,12 @@ const Dashboard = () => {
     const m = (meterNumber || "").trim().replace(/\D/g, "");
     if (m.length === 11 || m.length === 13) setDiagnosticMeterNumber(m);
   }, [meterNumber]);
+
+  // Auto-rotate live readings carousel every 4 seconds (7 screens: V,I,P,E,F,PF,T)
+  useEffect(() => {
+    const t = setInterval(() => setLiveScreenIdx(i => (i + 1) % 7), 4000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     const meter = diagnosticMeterNumber.trim() || purchases[0]?.meterNumber;
@@ -387,7 +407,7 @@ const Dashboard = () => {
                   </div>
                 </div>
 
-                {/* Used kWh - real-time when energyData available */}
+                {/* Energy Consumed - live session kWh from device */}
                 <div className="relative">
                   <div className="absolute inset-0 bg-gradient-to-br from-accent/10 to-transparent rounded-2xl"></div>
                   <div className="relative p-6 rounded-2xl border-2 border-accent/20 bg-white/50 backdrop-blur-sm hover:scale-105 transition-transform duration-300">
@@ -395,10 +415,18 @@ const Dashboard = () => {
                       <div className="p-2 rounded-lg bg-accent/20">
                         <Zap className="w-5 h-5 text-accent" />
                       </div>
-                      <p className="text-sm font-medium text-muted-foreground">Energy Consumed</p>
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground">Energy Consumed</p>
+                        <p className="text-xs text-muted-foreground/70">This session (live)</p>
+                      </div>
                     </div>
-                    <p className="text-5xl font-bold text-accent mb-1">{displayUsed.toFixed(1)}</p>
+                    <p className="text-5xl font-bold text-accent mb-1">{displayUsed.toFixed(3)}</p>
                     <p className="text-lg text-muted-foreground">kWh used</p>
+                    {displayTotalEnergy != null && (
+                      <p className="text-xs text-muted-foreground mt-2 pt-2 border-t border-accent/10">
+                        Total meter: <span className="font-semibold text-accent">{displayTotalEnergy.toFixed(3)} kWh</span>
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -426,6 +454,61 @@ const Dashboard = () => {
                   <span>{totalCapacity.toFixed(1)} kWh Total</span>
                 </div>
               </div>
+
+              {/* Live Readings Carousel - V, I, P, E, F, PF, Time */}
+              {energyData && (
+                <div className="mt-5">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Live Readings</p>
+                    <div className="flex gap-1">
+                      {liveScreens.map((_, i) => (
+                        <button key={i} onClick={() => setLiveScreenIdx(i)}
+                          className={`w-2 h-2 rounded-full transition-all duration-300 ${i === liveScreenIdx ? "bg-primary scale-125" : "bg-muted"}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="relative overflow-hidden rounded-xl">
+                    {liveScreens.map((screen, i) => (
+                      <div key={i}
+                        className={`transition-all duration-500 ${i === liveScreenIdx ? "opacity-100 translate-x-0" : "opacity-0 absolute inset-0 translate-x-8"}`}
+                      >
+                        <div className={`flex items-center justify-between p-4 border rounded-xl ${screen.bg}`}>
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-mono font-black text-xs border-2 ${screen.color} bg-white shadow-sm`}>
+                              {screen.icon}
+                            </div>
+                            <p className="text-sm font-medium text-slate-700">{screen.label}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className={`text-2xl font-black font-mono ${screen.color}`}>{screen.value}</p>
+                          </div>
+                          <div className="flex items-center gap-1 ml-3">
+                            <button onClick={() => setLiveScreenIdx(i => (i - 1 + liveScreens.length) % liveScreens.length)}
+                              className="w-6 h-6 rounded-full bg-white/70 flex items-center justify-center hover:bg-white transition-colors">
+                              <ChevronLeft className="w-3 h-3 text-slate-500" />
+                            </button>
+                            <button onClick={() => setLiveScreenIdx(i => (i + 1) % liveScreens.length)}
+                              className="w-6 h-6 rounded-full bg-white/70 flex items-center justify-center hover:bg-white transition-colors">
+                              <ChevronRight className="w-3 h-3 text-slate-500" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* All readings grid (compact) */}
+                  <div className="grid grid-cols-3 gap-2 mt-3">
+                    {liveScreens.slice(0, 6).map((s, i) => (
+                      <button key={i} onClick={() => setLiveScreenIdx(i)}
+                        className={`p-2 rounded-lg border text-center transition-all duration-200 ${i === liveScreenIdx ? s.bg + " scale-105 shadow-sm" : "bg-white/40 border-slate-100 hover:bg-white/70"}`}>
+                        <p className={`text-xs font-black font-mono ${i === liveScreenIdx ? s.color : "text-slate-500"}`}>{s.icon}</p>
+                        <p className={`text-sm font-bold font-mono truncate ${i === liveScreenIdx ? s.color : "text-slate-600"}`}>{s.value}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Status Indicator - real-time last update when energyData available */}
               <div className="mt-6 p-4 rounded-xl bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20">
@@ -478,7 +561,12 @@ const Dashboard = () => {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Total kWh</p>
-                  <p className="text-2xl font-bold text-primary group-hover:scale-110 transition-transform duration-300">{totalKwh.toFixed(2)} kWh</p>
+                  <p className="text-2xl font-bold text-primary group-hover:scale-110 transition-transform duration-300">
+                    {displayTotalEnergy != null ? displayTotalEnergy.toFixed(3) : totalKwh.toFixed(2)} kWh
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {displayTotalEnergy != null ? "Meter sensor (all time)" : "Purchased total"}
+                  </p>
                 </div>
               </div>
               <div className="absolute bottom-2 left-2 w-1 h-1 bg-accent rounded-full animate-electric-spark opacity-0 group-hover:opacity-100" style={{ animationDelay: '0.2s' }}></div>
