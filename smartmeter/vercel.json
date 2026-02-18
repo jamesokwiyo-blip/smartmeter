@@ -2,6 +2,10 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
+  "env": {
+    "VITE_API_URL": "https://smartmeter-jdw0.onrender.com/api",
+    "VITE_ENERGY_API_URL": "https://smartmeter-jdw0.onrender.com/api"
+  },
   "rewrites": [
     {
       "source": "/(.*)",

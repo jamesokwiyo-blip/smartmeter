@@ -23,7 +23,8 @@ const allowedOrigins = [
   'http://192.168.1.120:8081',
   'http://192.168.1.120:8082',
   'https://smartmeter-jdw0.onrender.com',
-  'https://smartmeter-coral.vercel.app'
+  'https://smartmeter-cyan.vercel.app',   // production Vercel frontend
+  'https://smartmeter-coral.vercel.app',
 ];
 
 const corsOptions = {
@@ -71,11 +72,14 @@ app.use((err, req, res, next) => {
 
 // Initialize database and start server
 initializeDatabase().then(() => {
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Server running on http://localhost:${PORT}`);
-    console.log(`📡 Network access: http://192.168.1.120:${PORT}`);
+  const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : '0.0.0.0';
+  app.listen(PORT, host, () => {
+    console.log(`✅ Server running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
     console.log(`📊 Database: MongoDB Atlas`);
-    console.log(`🔌 ESP32 endpoint: http://192.168.1.120:${PORT}/api/energy-data`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`📡 Network: http://192.168.1.120:${PORT}`);
+      console.log(`🔌 ESP32 → http://192.168.1.120:${PORT}/api/energy-data`);
+    }
   });
 }).catch((error) => {
   console.error('Failed to initialize database:', error);
