@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import purchasesRoutes from './routes/purchases.js';
+import energyDataRoutes from './routes/energyData.js';
 import { initializeDatabase } from './database.js';
 
 dotenv.config();
@@ -14,6 +15,7 @@ const PORT = process.env.PORT || 5000;
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:8080',
+  'http://localhost:8081',
   'http://localhost:3000',
   'https://smartmeter-jdw0.onrender.com',
   'https://smartmeter-coral.vercel.app'
@@ -49,6 +51,7 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/purchases', purchasesRoutes);
+app.use('/api', energyDataRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

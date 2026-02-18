@@ -48,8 +48,13 @@ const Dashboard = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const conversionRate = 125;
-  const totalCapacity = remainingKwh + usedKwh;
-  const usagePercentage = (usedKwh / totalCapacity) * 100;
+  // Use real-time energy data when available (from device), else fallback to state
+  const displayRemaining = energyData?.remainingKwh ?? remainingKwh;
+  const displayUsed = energyData?.consumedKwh ?? usedKwh;
+  const totalCapacity = displayRemaining + displayUsed;
+  const usagePercentage = totalCapacity > 0 ? (displayUsed / totalCapacity) * 100 : 0;
+  const lastUpdateText = energyData?.timestampFormatted || energyData?.serverTimestamp || (energyData ? "Just now" : "—");
+  const statusMeterId = energyData?.meterNumber || meterNumber || "Enter meter number";
 
   const validatePhoneNumber = (phone: string): boolean => {
     // Remove any spaces or special characters
@@ -126,6 +131,12 @@ const Dashboard = () => {
     }
   }, [purchases]);
 
+  // When user enters a valid meter number in buy form, use it for real-time Status + Diagnostics
+  useEffect(() => {
+    const m = (meterNumber || "").trim().replace(/\D/g, "");
+    if (m.length === 11 || m.length === 13) setDiagnosticMeterNumber(m);
+  }, [meterNumber]);
+
   useEffect(() => {
     const meter = diagnosticMeterNumber.trim() || purchases[0]?.meterNumber;
     if (!meter) return;
@@ -139,7 +150,7 @@ const Dashboard = () => {
       }
     };
     fetchData();
-    const t = setInterval(fetchData, 30000);
+    const t = setInterval(fetchData, 15000); // Poll every 15s for real-time Smart Meter Status + Diagnostics
     return () => clearInterval(t);
   }, [diagnosticMeterNumber, purchases]);
 
@@ -356,12 +367,12 @@ const Dashboard = () => {
                 </div>
                 <div className="text-right">
                   <p className="text-sm text-muted-foreground">Meter ID</p>
-                  <p className="font-mono font-bold text-navy text-lg">{meterNumber || "Enter meter number"}</p>
+                  <p className="font-mono font-bold text-navy text-lg">{statusMeterId}</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                {/* Remaining kWh */}
+                {/* Remaining kWh - real-time when energyData available */}
                 <div className="relative">
                   <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent rounded-2xl"></div>
                   <div className="relative p-6 rounded-2xl border-2 border-primary/20 bg-white/50 backdrop-blur-sm hover:scale-105 transition-transform duration-300">
@@ -371,12 +382,12 @@ const Dashboard = () => {
                       </div>
                       <p className="text-sm font-medium text-muted-foreground">Remaining Energy</p>
                     </div>
-                    <p className="text-5xl font-bold text-primary mb-1">{remainingKwh.toFixed(1)}</p>
+                    <p className="text-5xl font-bold text-primary mb-1">{displayRemaining.toFixed(1)}</p>
                     <p className="text-lg text-muted-foreground">kWh available</p>
                   </div>
                 </div>
 
-                {/* Used kWh */}
+                {/* Used kWh - real-time when energyData available */}
                 <div className="relative">
                   <div className="absolute inset-0 bg-gradient-to-br from-accent/10 to-transparent rounded-2xl"></div>
                   <div className="relative p-6 rounded-2xl border-2 border-accent/20 bg-white/50 backdrop-blur-sm hover:scale-105 transition-transform duration-300">
@@ -386,7 +397,7 @@ const Dashboard = () => {
                       </div>
                       <p className="text-sm font-medium text-muted-foreground">Energy Consumed</p>
                     </div>
-                    <p className="text-5xl font-bold text-accent mb-1">{usedKwh.toFixed(1)}</p>
+                    <p className="text-5xl font-bold text-accent mb-1">{displayUsed.toFixed(1)}</p>
                     <p className="text-lg text-muted-foreground">kWh used</p>
                   </div>
                 </div>
@@ -416,7 +427,7 @@ const Dashboard = () => {
                 </div>
               </div>
 
-              {/* Status Indicator */}
+              {/* Status Indicator - real-time last update when energyData available */}
               <div className="mt-6 p-4 rounded-xl bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -425,11 +436,11 @@ const Dashboard = () => {
                       <div className="absolute inset-0 w-3 h-3 bg-primary rounded-full animate-ping"></div>
                     </div>
                     <div>
-                      <p className="text-sm font-semibold text-navy">Meter Status: Active</p>
-                      <p className="text-xs text-muted-foreground">Last updated: Just now</p>
+                      <p className="text-sm font-semibold text-navy">Meter Status: {energyData ? "Active (live)" : "Active"}</p>
+                      <p className="text-xs text-muted-foreground">Last updated: {lastUpdateText}</p>
                     </div>
                   </div>
-                  {remainingKwh < 20 && (
+                  {displayRemaining < 20 && (
                     <div className="px-3 py-1 rounded-full bg-warning/20 border border-warning/30">
                       <p className="text-xs font-bold text-warning">Low Balance</p>
                     </div>
