@@ -92,6 +92,7 @@ AdvKeyPad keypad(KBD_ADDR);
 #define EEPROM_ADDR_REMAINING_KWH       0   // float (4 bytes)
 #define EEPROM_ADDR_SESSION_PURCHASED   4   // float (4 bytes)
 #define EEPROM_ADDR_PZEM_SESSION_START  8   // float (4 bytes) — PZEM energy() at token application time
+#define EEPROM_ADDR_TOKEN              12   // char[21] — active 20-digit token + null terminator
 
 // --------------------- TOKENS ----------------------------
 // Token format: 20 digits with spaces (e.g., "1888 6583 5478 3413 6861")
@@ -166,6 +167,7 @@ void loadEnergyFromEEPROM();
 void saveRemainingToEEPROM();
 void saveSessionPurchasedToEEPROM();
 void savePzemSessionStartToEEPROM();
+void saveTokenToEEPROM();
 
 // Forward declarations
 void showReadyScreen();
@@ -352,21 +354,10 @@ void loop() {
       lastDisplayMillis = now;
     }
 
-    // Output AC parameters and energy on Serial monitor (same as sent to API/dashboard)
+    // Guard: only proceed with API send and exhaustion check when sensor gives valid readings
     float voltage = pzem.voltage();
     float current = pzem.current();
-    float powerW = pzem.power();
-    float energyKwh = pzem.energy();
-    float frequency = pzem.frequency();
-    float pf = pzem.pf();
     if (!isnan(voltage) && !isnan(current)) {
-      SERIAL_PRINT("V:"); SERIAL_PRINT(voltage); SERIAL_PRINT("V ");
-      SERIAL_PRINT("I:"); SERIAL_PRINT(current); SERIAL_PRINT("A ");
-      if (!isnan(powerW)) { SERIAL_PRINT("P:"); SERIAL_PRINT(powerW); SERIAL_PRINT("W "); }
-      if (!isnan(energyKwh)) { SERIAL_PRINT("E:"); SERIAL_PRINT(energyKwh, 3); SERIAL_PRINT("kWh "); }
-      if (!isnan(frequency)) { SERIAL_PRINT("F:"); SERIAL_PRINT(frequency); SERIAL_PRINT("Hz "); }
-      if (!isnan(pf)) { SERIAL_PRINT("PF:"); SERIAL_PRINTLN(pf); } else { SERIAL_PRINTLN(""); }
-    }
 
     // Send data to API periodically - SKIP during keypad priority so keypad stays responsive
     if (!keypadPriorityActive &&
@@ -394,7 +385,8 @@ void loop() {
         saveRemainingToEEPROM();
       }
     }
-  }
+  }  // end if (!isnan(voltage) && !isnan(current))
+  }  // end if (state == STATE_RUNNING)
 
   if (state == STATE_EXHAUSTED) {
     if (millis() - lastDisplayMillis >= 1000) {
@@ -567,6 +559,11 @@ void sendEnergyDataToAPI() {
     }
   }
   wifiConnected = true;
+
+  if (currentToken.length() == 0) {
+    SERIAL_PRINTLN("Skipping API send: no active token");
+    return;
+  }
 
   HTTPClient http;
   String url = String(apiBaseUrl) + "/energy-data";
@@ -822,6 +819,7 @@ bool applyTokenFromServer(String tokenNumber, float kwhAmount, String purchaseId
   session_purchased_kwh = remaining_kwh;
   saveRemainingToEEPROM();
   saveSessionPurchasedToEEPROM();
+  saveTokenToEEPROM();
   digitalWrite(RELAY_PIN, HIGH);  // Power to load
   
   SERIAL_PRINT("Token applied from server, kWh: "); SERIAL_PRINTLN(kwhAmount);
@@ -1135,6 +1133,7 @@ void submitToken() {
   saveRemainingToEEPROM();
   saveSessionPurchasedToEEPROM();
   savePzemSessionStartToEEPROM();
+  saveTokenToEEPROM();
   SERIAL_PRINT("Local token: PZEM baseline = "); SERIAL_PRINTLN(pzem_energy_at_session_start);
   digitalWrite(RELAY_PIN, HIGH);  // Power to load
   showRunningScreen();
@@ -1383,6 +1382,15 @@ void loadEnergyFromEEPROM() {
   if (!isnan(r) && r >= 0.0f) remaining_kwh = r;
   if (!isnan(s) && s >= 0.0f) session_purchased_kwh = s;
   if (!isnan(p) && p >= 0.0f) pzem_energy_at_session_start = p;
+  // Restore active token so API sends survive reboots
+  char savedToken[21] = {0};
+  EEPROM.get(EEPROM_ADDR_TOKEN, savedToken);
+  savedToken[20] = '\0';
+  if (savedToken[0] >= '0' && savedToken[0] <= '9') {
+    currentToken = String(savedToken);
+    lastTokenEntered = currentToken;
+    SERIAL_PRINT("Restored token from EEPROM: "); SERIAL_PRINTLN(currentToken);
+  }
 }
 
 void saveRemainingToEEPROM() {
@@ -1397,5 +1405,12 @@ void saveSessionPurchasedToEEPROM() {
 
 void savePzemSessionStartToEEPROM() {
   EEPROM.put(EEPROM_ADDR_PZEM_SESSION_START, pzem_energy_at_session_start);
+  EEPROM.commit();
+}
+
+void saveTokenToEEPROM() {
+  char buf[21] = {0};
+  currentToken.toCharArray(buf, sizeof(buf));
+  EEPROM.put(EEPROM_ADDR_TOKEN, buf);
   EEPROM.commit();
 }
