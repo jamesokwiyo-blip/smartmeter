@@ -33,11 +33,13 @@ router.post('/energy-data', (req, res) => {
     if (!data.meterNumber || !data.token) {
       return res.status(400).json({ success: false, error: 'meterNumber and token required' });
     }
-    if (!/^\d{13}$/.test(data.meterNumber)) {
-      return res.status(400).json({ success: false, error: 'meterNumber must be 13 digits' });
+    // Accept 11 or 13-digit meter numbers
+    if (!/^\d{11}$/.test(data.meterNumber) && !/^\d{13}$/.test(data.meterNumber)) {
+      return res.status(400).json({ success: false, error: 'meterNumber must be 11 or 13 digits' });
     }
-    if (!/^\d{20}$/.test(data.token)) {
-      return res.status(400).json({ success: false, error: 'token must be 20 digits' });
+    // Token: accept any non-empty alphanumeric string (20-digit decimal from server, or legacy formats)
+    if (typeof data.token !== 'string' || data.token.trim().length === 0) {
+      return res.status(400).json({ success: false, error: 'token must be a non-empty string' });
     }
     const enriched = { ...data, serverTimestamp: getTimestamp(), receivedAt: Date.now() };
     saveDataToFile(enriched);

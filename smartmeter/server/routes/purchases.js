@@ -1,15 +1,30 @@
 import express from 'express';
 import db from '../database.js';
 import { verifyToken } from './auth.js';
-import crypto from 'crypto';
 
 const router = express.Router();
 
-// Generate unique token and recharge code
+// Generate a 20-digit decimal token (matches ESP32 expected format)
+function generate20DigitToken() {
+  // Build 20 random decimal digits ensuring first digit is never 0
+  const digits = [];
+  digits.push(String(Math.floor(Math.random() * 9) + 1)); // first digit 1-9
+  for (let i = 1; i < 20; i++) {
+    digits.push(String(Math.floor(Math.random() * 10)));
+  }
+  return digits.join('');
+}
+
+// Short human-readable recharge code shown in purchase receipt
+function generateRechargeCode() {
+  const seg = () => Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `${seg()}-${seg()}`;
+}
+
 function generateTokenAndCode() {
   return {
-    tokenNumber: crypto.randomBytes(6).toString('hex').toUpperCase(),
-    rechargeCode: `${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`
+    tokenNumber: generate20DigitToken(),
+    rechargeCode: generateRechargeCode(),
   };
 }
 
@@ -32,7 +47,7 @@ router.post('/buy', verifyToken, async (req, res) => {
     // Create meter if needed
     await db.createMeter(userId, meterNumber);
 
-    // Create purchase
+    // Create purchase with PENDING status — device must confirm receipt
     const purchase = await db.createPurchase(
       userId,
       meterNumber,
@@ -41,7 +56,8 @@ router.post('/buy', verifyToken, async (req, res) => {
       paymentMethod,
       mobileNumber || null,
       tokenNumber,
-      rechargeCode
+      rechargeCode,
+      'PENDING'
     );
 
     res.json({
@@ -137,6 +153,54 @@ router.get('/meters', verifyToken, async (req, res) => {
   } catch (error) {
     console.error('Meters error:', error);
     res.status(500).json({ error: 'Failed to get meters' });
+  }
+});
+
+/**
+ * GET /purchases/pending-token/:meterNumber
+ * ESP32 polls this every 10s to receive a freshly purchased token.
+ * Returns the most recent PENDING purchase for this meter.
+ */
+router.get('/pending-token/:meterNumber', async (req, res) => {
+  try {
+    const { meterNumber } = req.params;
+    const purchases = await db.getPurchasesByMeterNumber(meterNumber);
+
+    // Find most recent PENDING purchase
+    const pending = purchases.find(p => p.status === 'PENDING');
+
+    if (pending) {
+      return res.json({
+        success: true,
+        hasToken: true,
+        token: {
+          purchaseId: pending._id.toString(),
+          tokenNumber: pending.tokenNumber,
+          kwhAmount: pending.kwhAmount,
+          rechargeCode: pending.rechargeCode,
+        },
+      });
+    }
+
+    return res.json({ success: true, hasToken: false });
+  } catch (error) {
+    console.error('Pending token error:', error);
+    res.status(500).json({ success: false, error: 'Failed to check pending token' });
+  }
+});
+
+/**
+ * POST /purchases/confirm-token/:purchaseId
+ * ESP32 calls this after successfully applying the token to mark it DELIVERED.
+ */
+router.post('/confirm-token/:purchaseId', async (req, res) => {
+  try {
+    const { purchaseId } = req.params;
+    await db.updatePurchaseStatus(purchaseId, 'DELIVERED');
+    return res.json({ success: true, message: 'Token confirmed as delivered' });
+  } catch (error) {
+    console.error('Confirm token error:', error);
+    res.status(500).json({ success: false, error: 'Failed to confirm token' });
   }
 });
 

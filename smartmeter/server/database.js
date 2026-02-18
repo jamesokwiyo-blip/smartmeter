@@ -74,7 +74,7 @@ const db = {
   },
 
   // Purchases
-  async createPurchase(userId, meterNumber, amountRWF, kwhAmount, paymentMethod, mobileNumber, tokenNumber, rechargeCode) {
+  async createPurchase(userId, meterNumber, amountRWF, kwhAmount, paymentMethod, mobileNumber, tokenNumber, rechargeCode, status = 'PENDING') {
     try {
       const purchase = await Purchase.create({
         userId,
@@ -85,7 +85,7 @@ const db = {
         mobileNumber: mobileNumber || null,
         tokenNumber,
         rechargeCode,
-        status: 'COMPLETED',
+        status,
         date: new Date().toISOString().split('T')[0]
       });
       return purchase;
@@ -105,6 +105,14 @@ const db = {
   async getPurchasesByMeterNumber(meterNumber) {
     try {
       return await Purchase.find({ meterNumber }).sort({ createdAt: -1 });
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  async updatePurchaseStatus(purchaseId, status) {
+    try {
+      return await Purchase.findByIdAndUpdate(purchaseId, { status }, { new: true });
     } catch (error) {
       throw error;
     }
