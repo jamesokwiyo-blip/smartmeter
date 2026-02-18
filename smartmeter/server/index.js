@@ -16,18 +16,24 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:8080',
   'http://localhost:8081',
+  'http://localhost:8082',
+  'http://localhost:8083',
   'http://localhost:3000',
+  'http://192.168.1.120:8080',
+  'http://192.168.1.120:8081',
+  'http://192.168.1.120:8082',
   'https://smartmeter-jdw0.onrender.com',
   'https://smartmeter-coral.vercel.app'
 ];
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (curl, mobile apps) and same-origin
+    // Allow requests with no origin (ESP32, curl, Postman) and same-origin
     if (!origin) return callback(null, true);
 
     const isAllowed =
       allowedOrigins.includes(origin) ||
+      origin.startsWith('http://192.168.') ||   // any local network device
       origin.endsWith('.vercel.app') ||
       origin.endsWith('.netlify.app');
 
@@ -35,7 +41,6 @@ const corsOptions = {
       return callback(null, true);
     }
     console.log('Blocked origin:', origin);
-    // Return false instead of throwing error to ensure preflight gets CORS headers
     return callback(null, false);
   },
   credentials: true,
@@ -66,9 +71,11 @@ app.use((err, req, res, next) => {
 
 // Initialize database and start server
 initializeDatabase().then(() => {
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Server running on http://localhost:${PORT}`);
+    console.log(`📡 Network access: http://192.168.1.120:${PORT}`);
     console.log(`📊 Database: MongoDB Atlas`);
+    console.log(`🔌 ESP32 endpoint: http://192.168.1.120:${PORT}/api/energy-data`);
   });
 }).catch((error) => {
   console.error('Failed to initialize database:', error);
