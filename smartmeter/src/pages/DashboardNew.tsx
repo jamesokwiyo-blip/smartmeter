@@ -78,10 +78,8 @@ const Dashboard = () => {
   };
 
   const validateMeterNumber = (meter: string): boolean => {
-    // Remove any spaces or special characters
     const cleanMeter = meter.replace(/\s+/g, '').replace(/[^\d]/g, '');
-    // Check if it's exactly 11 digits
-    return cleanMeter.length === 11;
+    return cleanMeter.length === 11 || cleanMeter.length === 13;
   };
 
   const scrollTable = (direction: 'left' | 'right' | 'up' | 'down') => {
@@ -184,7 +182,7 @@ const Dashboard = () => {
     }
     
     if (!validateMeterNumber(meterNumber)) {
-      setError("Meter number must be exactly 11 digits");
+      setError("Meter number must be exactly 11 or 13 digits");
       return;
     }
     
@@ -605,16 +603,16 @@ const Dashboard = () => {
                 <div className="space-y-6 relative z-10">
                   {/* Meter Number */}
                   <div className="relative z-10">
-                    <Label htmlFor="meterNumber" className="text-navy font-medium">Meter Number (11 digits)</Label>
+                    <Label htmlFor="meterNumber" className="text-navy font-medium">Meter Number (11 or 13 digits)</Label>
                     <Input
                       id="meterNumber"
-                      placeholder="Enter 11-digit meter number"
+                      placeholder="Enter meter number"
                       value={meterNumber}
                       onChange={(e) => setMeterNumber(e.target.value)}
                       className="mt-2 h-12 border-2 focus:border-primary relative z-10"
-                      maxLength={11}
+                      maxLength={13}
                     />
-                    <p className="text-xs text-muted-foreground mt-1">Enter your 11-digit smart meter number</p>
+                    <p className="text-xs text-muted-foreground mt-1">Enter your 11 or 13-digit smart meter number</p>
                   </div>
 
                   {/* Amount */}
