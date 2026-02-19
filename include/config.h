@@ -10,7 +10,7 @@
 // ==================== SERIAL LOGGING ====================
 // 0 = Production: no verbose serial output (avoids flooding monitor)
 // 1 = Development: full Serial.print/println for debugging
-#define SERIAL_LOGGING_ENABLED 1
+#define SERIAL_LOGGING_ENABLED 0
 
 // ==================== METER DETAILS ====================
 // 13-digit meter number (e.g. "0215002079873")
@@ -32,6 +32,6 @@
 // ==================== API ====================
 // Local test:  http://192.168.1.120:5000/api  (same WiFi network as dev machine)
 // Production:  https://smartmeter-jdw0.onrender.com/api
-#define API_BASE_URL "http://192.168.1.120:5000/api"
+#define API_BASE_URL "https://smartmeter-jdw0.onrender.com/api"
 
 #endif // CONFIG_H
