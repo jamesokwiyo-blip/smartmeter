@@ -2,18 +2,61 @@
 
 This document provides examples for testing the Smart Energy Meter API using Postman and curl.
 
+## Build and upload (ESP32)
+
+Run these from the **project root** (the folder that contains `platformio.ini`), e.g.  
+`SMART ENERGY METER` or `.\`:
+
+**Command line (from project root):**
+```bash
+# Build
+pio run
+
+# Upload firmware to ESP32
+pio run -t upload
+
+# Serial monitor (debug)
+pio device monitor
+```
+
+**Windows PowerShell** (from project root; if `pio` is not in PATH):
+```powershell
+cd "C:\Users\ASCOS CO.LTD\Documents\PlatformIO\Projects\SMART ENERGY METER"
+$env:PATH += ";$env:USERPROFILE\.platformio\penv\Scripts"
+pio run
+pio run -t upload
+pio device monitor
+```
+
+**In VS Code (PlatformIO IDE):** open the project root, then use the toolbar: **Build** (✓), **Upload** (→→), **Serial Monitor** (plug icon).
+
+---
+
 ## Prerequisites
 
-1. Start the API server:
+1. Start the API server (use one of these):
+
+   **Option A – smartmeter backend (port 5000, recommended for dashboard + ESP32):**
+   ```bash
+   cd smartmeter
+   npm install
+   npm run dev:server
+   ```
+   Server: `http://localhost:5000`
+
+   **Option B – api-server only (port 3000):**
    ```bash
    cd api-server
    npm install
    npm start
    ```
+   Server: `http://localhost:3000`
 
-2. The server should be running on `http://localhost:3000`
+2. Ensure the server is running before running the tests below.
 
 ## Testing with cURL
+
+Use `http://localhost:5000` if you started the **smartmeter** backend, or `http://localhost:3000` if you started **api-server**. The examples below use port 3000; replace with 5000 when using the smartmeter backend.
 
 ### 1. Health Check
 

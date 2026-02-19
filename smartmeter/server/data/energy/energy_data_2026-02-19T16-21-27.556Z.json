@@ -1,0 +1,20 @@
+{
+  "meterNumber": "0215002079873",
+  "token": "56403367795436884620",
+  "clientName": "YUMVUHORE",
+  "clientTIN": "1200000",
+  "clientPhone": "0782946444",
+  "remainingKwh": 5.800000191,
+  "consumedKwh": 0.028999999,
+  "sessionDuration": 1499,
+  "voltage": 228.1999969,
+  "current": 0,
+  "power": 0,
+  "totalEnergy": 0.028999999,
+  "frequency": 50.09999847,
+  "powerFactor": 0,
+  "timestamp": 1771525286000,
+  "timestampFormatted": "2026-02-19T18:21:26",
+  "serverTimestamp": "2026-02-19T16:21:27.556Z",
+  "receivedAt": 1771518087556
+}

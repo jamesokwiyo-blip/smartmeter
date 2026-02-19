@@ -17,6 +17,7 @@
 #include <Wire.h>
 #include <AdvKeyPad.h>
 #include <WiFi.h>
+#include <WiFiManager.h>
 #include <WiFiUdp.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
@@ -27,8 +28,7 @@
 #include <math.h>
 
 // --------------------- WIFI & API (from config.h) -------
-const char* ssid = WIFI_SSID;
-const char* password = WIFI_PASSWORD;
+// WiFi: credentials configured via WiFiManager captive portal (no hardcoded SSID/password)
 const char* apiBaseUrl = API_BASE_URL;
 
 // --------------------- NTP CONFIG ---------------------
@@ -181,6 +181,7 @@ void connectWiFi();
 void sendEnergyDataToAPI();
 void sendTestDataToAPI();  // Function to send test data for server testing
 void showWiFiConnectingScreen();
+void showWiFiConfigPortalScreen(WiFiManager* wm);
 void showMeterNumberScreen();
 void showCheckEnergyScreen();
 void showPreviousTokenScreen();
@@ -193,6 +194,8 @@ String getFormattedTimestamp();  // Get formatted timestamp (ISO 8601 format)
 void setup() {
   Serial.begin(115200);
   delay(50);
+  // Always print so serial monitor shows we're running (even if SERIAL_LOGGING_ENABLED is 0)
+  Serial.println(F("[SmartMeter] Setup started"));
   Serial2.begin(9600, SERIAL_8N1, PZEM_RX_PIN, PZEM_TX_PIN);
 
   display.begin();
@@ -203,12 +206,14 @@ void setup() {
 
   Wire.begin(SDA_PIN, SCL_PIN);
   if (!keypad.begin()) {
+    Serial.println(F("[SmartMeter] Warning: Keypad not found - continuing (WiFi AP will still start)"));
     SERIAL_PRINTLN("Error: Couldn't find PCF8574T I2C expander");
     display.clearDisplay();
     display.setCursor(0,0);
     display.println("Keypad Err");
     display.display();
-    while (1);
+    delay(2000);
+    // Continue so WiFi config AP can still appear
   }
 
   pinMode(RELAY_PIN, OUTPUT);
@@ -227,6 +232,7 @@ void setup() {
   }
 
   // Connect to WiFi
+  Serial.println(F("[SmartMeter] Starting WiFi..."));
   state = STATE_WIFI_CONNECTING;
   showWiFiConnectingScreen();
   connectWiFi();
@@ -425,28 +431,37 @@ void loop() {
 }
 
 void connectWiFi() {
-  SERIAL_PRINT("Connecting to WiFi: ");
-  SERIAL_PRINTLN(ssid);
-  
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, password);
-  
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
-    for (int i = 0; i < 10; i++) { handleKeypad(); delay(50); }  // ~500ms, keypad stays responsive
-    SERIAL_PRINT(".");
-    attempts++;
-  }
-  
-  if (WiFi.status() == WL_CONNECTED) {
+  WiFiManager wifiManager;
+
+#if FORCE_WIFI_CONFIG_PORTAL
+  wifiManager.resetSettings();
+  Serial.println(F("[SmartMeter] WiFi config forced - AP will start"));
+#endif
+
+  // Short connect timeout so we open the AP quickly if no/bad saved WiFi
+  wifiManager.setConnectTimeout(20);        // Try saved WiFi for 20s, then start AP
+  wifiManager.setConfigPortalTimeout(180);  // Keep AP open 3 min for user to configure
+
+  // When config portal (AP) starts, show portal URL on the display so user knows where to go
+  wifiManager.setAPCallback(showWiFiConfigPortalScreen);
+
+  // Always print to Serial so you see this even with SERIAL_LOGGING_ENABLED=0
+  Serial.print(F("[SmartMeter] WiFiManager AP name: "));
+  Serial.println(F(WIFI_AP_NAME));
+  Serial.println(F("  Connect to AP, then open in browser: http://192.168.4.1"));
+  SERIAL_PRINTLN("Starting WiFiManager...");
+
+  // Blocks until connected: uses saved credentials or opens AP for first-time config
+  bool connected = wifiManager.autoConnect(WIFI_AP_NAME);
+
+  if (connected) {
     wifiConnected = true;
-    SERIAL_PRINTLN("");
     SERIAL_PRINTLN("WiFi connected!");
     SERIAL_PRINT("IP address: ");
     SERIAL_PRINTLN(WiFi.localIP());
     SERIAL_PRINT("MAC address: ");
     SERIAL_PRINTLN(WiFi.macAddress());
-    
+
     // Initialize NTP client after WiFi connection
     timeClient.begin();
     timeSynchronized = false;
@@ -455,8 +470,7 @@ void connectWiFi() {
     ntpRetries = 10;
   } else {
     wifiConnected = false;
-    SERIAL_PRINTLN("");
-    SERIAL_PRINTLN("WiFi connection failed!");
+    SERIAL_PRINTLN("WiFi connection failed (timeout or user cancelled).");
   }
 }
 
@@ -660,7 +674,9 @@ void sendEnergyDataToAPI() {
   } else {
     SERIAL_PRINT("Error code: ");
     SERIAL_PRINTLN(httpResponseCode);
-    SERIAL_PRINTLN("Failed after retries. WiFi status: " + String(WiFi.status()));
+    SERIAL_PRINT("URL: ");
+    SERIAL_PRINTLN(url);
+    SERIAL_PRINTLN("Connection failed: is the server running at that IP:5000? Same WiFi? Firewall?");
   }
 
   http.end();
@@ -772,8 +788,11 @@ bool checkForPendingToken() {
     }
     // No pending token found - silently continue (don't log every check)
     // Device will maintain current state and remaining energy
+  } else if (httpResponseCode == -1) {
+    // -1 = connection failed (server unreachable) - log URL so user can fix config
+    SERIAL_PRINT("Pending token: connection failed (-1) to ");
+    SERIAL_PRINTLN(url);
   } else {
-    // Only log actual errors, not "no token" responses
     SERIAL_PRINT("Error checking pending token: ");
     SERIAL_PRINTLN(httpResponseCode);
   }
@@ -1370,6 +1389,18 @@ void showWiFiConnectingScreen() {
   printHeader("CONNECTING...");
   display.println("WiFi");
   display.println("Please wait...");
+  display.display();
+}
+
+// Called by WiFiManager when config portal (AP) starts - show portal URL on display
+void showWiFiConfigPortalScreen(WiFiManager* /*wm*/) {
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println(F("WiFi Setup"));
+  display.print(F("AP: "));
+  display.println(F(WIFI_AP_NAME));
+  display.println(F("Open in browser:"));
+  display.println(F("192.168.4.1"));
   display.display();
 }
 

@@ -21,9 +21,13 @@
 #define CLIENT_TIN     "1200000"              // Optional, leave empty if not available
 #define CLIENT_PHONE   "0782946444"
 
-// ==================== WIFI ====================
-#define WIFI_SSID     "Airtel_4G_SMARTCONNECT_F812"
-#define WIFI_PASSWORD "9B9F0F52"
+// ==================== WIFI (WiFiManager - no hardcoded credentials) ====================
+// AP name shown when device starts in config mode (user connects to this, then enters WiFi SSID/password)
+// Use only letters/numbers if the AP does not show on some phones (e.g. "SmartMeterWiFi")
+#define WIFI_AP_NAME  "SmartMeterWiFi"
+
+// Set to 1 to force the WiFi config AP on next boot (then set back to 0 and re-upload)
+#define FORCE_WIFI_CONFIG_PORTAL  0
 
 // ==================== API ====================
 // Local test:  http://192.168.1.120:5000/api  (same WiFi network as dev machine)
